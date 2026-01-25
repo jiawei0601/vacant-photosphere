@@ -138,10 +138,16 @@ class MarketMonitor:
             
             if not date_info:
                 date_info = f"📅 基準日期: `{stats['date']}`\n\n"
+            
+            # 漲跌幅顯示處理
+            change_str = "---"
+            if stats['change_pct'] is not None:
+                emoji = "🔴" if stats['change_pct'] > 0 else "🟢" if stats['change_pct'] < 0 else "⚪"
+                change_str = f"{emoji} {stats['change_pct']}%"
                 
             line = f"• **{item['name']}** ({symbol})\n"
-            line += f"  開: `{stats['open']}` / 收: `{stats['close']}`\n"
-            line += f"  高: `{stats['high']}` / 低: `{stats['low']}`\n"
+            line += f"  收: `{stats['close']}` ({change_str})\n"
+            line += f"  開: `{stats['open']}` / 高: `{stats['high']}` / 低: `{stats['low']}`\n"
             line += f"  MA20: `{stats['ma20'] or '計算中'}`"
             lines.append(line)
             

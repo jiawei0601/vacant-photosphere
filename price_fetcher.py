@@ -83,6 +83,14 @@ class PriceFetcher:
                 idx = -1 - offset
                 last_row = df.iloc[idx]
                 
+                # 取得更前一天的收盤價來計算漲跌幅
+                change_pct = None
+                if len(df) > abs(idx - 1):
+                    prev_close = float(df.iloc[idx - 1]['close'])
+                    current_close = float(last_row['close'])
+                    if prev_close != 0:
+                        change_pct = round(((current_close - prev_close) / prev_close) * 100, 2)
+                
                 date_str = last_row.get('date', '未知日期')
                 
                 return {
@@ -91,7 +99,8 @@ class PriceFetcher:
                     "close": float(last_row.get('close', 0)),
                     "high": float(last_row.get('max', 0)),
                     "low": float(last_row.get('min', 0)),
-                    "ma20": round(float(last_row.get('ma20', 0)), 2) if last_row.get('ma20') else None
+                    "ma20": round(float(last_row.get('ma20', 0)), 2) if last_row.get('ma20') else None,
+                    "change_pct": change_pct
                 }
             return None
         except Exception as e:
