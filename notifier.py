@@ -23,6 +23,7 @@ class Notifier:
             self.app.add_handler(CommandHandler("setlow", self._set_low_command))
             self.app.add_handler(CommandHandler("interval", self._set_interval_command))
             self.app.add_handler(CommandHandler("mode", self._set_mode_command))
+            self.app.add_handler(CommandHandler("prev", self._prev_command))
             self.app.add_handler(CommandHandler("help", self._help_command))
             from telegram.ext import MessageHandler, filters
             self.app.add_handler(MessageHandler(filters.ALL, self._debug_handler))
@@ -39,6 +40,7 @@ class Notifier:
                 "📌 可用指令清單\n\n"
                 "🔍 查詢功能\n"
                 "• /show all - 顯示目前 Notion 中所有標的摘要\n"
+                "• /prev - 顯示前一交易日的完整收盤報告\n"
                 "• /list - 顯示目前已暫停警報的清單\n\n"
                 "⚙️ 設定功能\n"
                 "• /sethigh [代碼] [價格] - 設定上限警戒值\n"
@@ -53,6 +55,19 @@ class Notifier:
             await update.message.reply_text(help_text)
         except Exception as e:
             print(f"發送 Help 訊息時發生錯誤: {e}")
+
+    async def _prev_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.data_callback:
+            await update.message.reply_text("系統尚未準備好，請稍後再試。")
+            return
+            
+        # 我們重複使用 data_callback，但需要知道如何請求前一日資料
+        # 這裡我們稍微修改機制，讓回呼可以接受參數
+        summary = await self.data_callback(offset=1)
+        if not summary:
+            await update.message.reply_text("無法獲取前一交易日資料。")
+        else:
+            await update.message.reply_text(f"📊 **前一交易日收盤報告**\n\n{summary}", parse_mode='Markdown')
 
     def set_data_callback(self, callback):
         """設定用於獲取標的摘要的回呼函式"""

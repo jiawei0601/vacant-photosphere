@@ -55,15 +55,16 @@ class PriceFetcher:
             traceback.print_exc()
             return None
 
-    def get_full_stats(self, symbol):
+    def get_full_stats(self, symbol, offset=0):
         """
         獲取股票的完整統計資訊：開盤、收盤、最高、最低、MA20
+        offset=0 為最新資料 (當日), offset=1 為前一日資料
         """
         try:
             from datetime import datetime, timedelta
-            # 獲取約 40 天的資料以確保計算出 MA20
+            # 獲取約 60 天的資料以確保計算出 MA20
             end_date = datetime.now().strftime("%Y-%m-%d")
-            start_date = (datetime.now() - timedelta(days=60)).strftime("%Y-%m-%d")
+            start_date = (datetime.now() - timedelta(days=65)).strftime("%Y-%m-%d")
             
             df = self.loader.taiwan_stock_daily(
                 stock_id=symbol,
@@ -71,20 +72,21 @@ class PriceFetcher:
                 end_date=end_date
             )
             
-            if df is not None and not df.empty:
+            if df is not None and len(df) > offset:
                 # 統一欄位名稱為小寫以方便處理
                 df.columns = [c.lower() for c in df.columns]
-                
-                if 'close' not in df.columns:
-                    print(f"找不到價格欄位。可用欄位: {df.columns.tolist()}")
-                    return None
                 
                 # 計算 MA20
                 df['ma20'] = df['close'].rolling(window=20).mean()
                 
-                last_row = df.iloc[-1]
+                # 取得指定 offset 的資料 (最後一筆是 -1, 前一筆是 -2)
+                idx = -1 - offset
+                last_row = df.iloc[idx]
+                
+                date_str = last_row.get('date', '未知日期')
                 
                 return {
+                    "date": date_str,
                     "open": float(last_row.get('open', 0)),
                     "close": float(last_row.get('close', 0)),
                     "high": float(last_row.get('high', 0)),

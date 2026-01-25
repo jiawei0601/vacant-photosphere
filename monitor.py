@@ -86,8 +86,11 @@ class MarketMonitor:
             # 更新 Notion
             self.notion.update_price_and_status(item['page_id'], price, status)
 
-    async def get_summary_callback(self):
+    async def get_summary_callback(self, offset=0):
         """回傳目前所有監控標的的摘要文字"""
+        if offset > 0:
+            return await self.get_detailed_summary(offset=offset)
+            
         items = self.notion.get_monitoring_list()
         if not items:
             return ""
@@ -117,20 +120,24 @@ class MarketMonitor:
             return True
         return False
 
-    async def get_detailed_summary(self):
+    async def get_detailed_summary(self, offset=0):
         """回傳目前所有監控標的的詳細摘要 (開、收、高、低、MA20)"""
         items = self.notion.get_monitoring_list()
         if not items:
             return "目前監控清單為空。"
             
         lines = []
+        date_info = ""
         for item in items:
             symbol = item['symbol']
-            stats = self.fetcher.get_full_stats(symbol)
+            stats = self.fetcher.get_full_stats(symbol, offset=offset)
             
             if not stats:
                 lines.append(f"• **{item['name']}** ({symbol}): 無法獲取詳細資料")
                 continue
+            
+            if not date_info:
+                date_info = f"📅 基準日期: `{stats['date']}`\n\n"
                 
             line = f"• **{item['name']}** ({symbol})\n"
             line += f"  開: `{stats['open']}` / 收: `{stats['close']}`\n"
@@ -138,7 +145,7 @@ class MarketMonitor:
             line += f"  MA20: `{stats['ma20'] or '計算中'}`"
             lines.append(line)
             
-        return "\n\n".join(lines)
+        return date_info + "\n\n".join(lines)
 
     async def change_config_callback(self, interval=None, allow_outside=None):
         """處理來自 Telegram 的系統配置修改請求"""
@@ -164,7 +171,10 @@ class MarketMonitor:
                     # 09:00 開盤提醒
                     if curr_time >= dt_time(9, 0) and curr_time < dt_time(9, 10):
                         if self.last_open_date != today:
-                            await self.notifier.send_message("☀️ **台股今日開盤**！\n系統已開始監控...")
+                            # 獲取前一日摘要
+                            prev_summary = await self.get_detailed_summary(offset=1)
+                            message = f"☀️ **台股今日開盤**！\n\n📊 **前一交易日收盤報告**\n{prev_summary}\n\n系統已開始監控..."
+                            await self.notifier.send_message(message)
                             self.last_open_date = today
                     
                     # 13:30 收盤總結
