@@ -7,10 +7,13 @@ load_dotenv()
 
 class PriceFetcher:
     def __init__(self):
-        self.api_token = os.getenv("FINMIND_TOKEN", "")
+        self.api_token = os.getenv("FINMIND_TOKEN", "").strip()
         self.loader = DataLoader()
         if self.api_token:
+            print("正在使用 Token 登入 FinMind...")
             self.loader.login_by_token(api_token=self.api_token)
+        else:
+            print("⚠️ 警告: 未設定 FINMIND_TOKEN，可能導致 API 存取受限或失敗")
 
     def get_last_price(self, symbol):
         """
