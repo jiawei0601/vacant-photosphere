@@ -48,10 +48,52 @@ class PriceFetcher:
                 
                 print(f"找不到代碼 {symbol} 的價格資料")
                 return None
+            return None
         except Exception as e:
             print(f"獲取價格時發生錯誤: {e}")
             import traceback
             traceback.print_exc()
+            return None
+
+    def get_full_stats(self, symbol):
+        """
+        獲取股票的完整統計資訊：開盤、收盤、最高、最低、MA20
+        """
+        try:
+            from datetime import datetime, timedelta
+            # 獲取約 40 天的資料以確保計算出 MA20
+            end_date = datetime.now().strftime("%Y-%m-%d")
+            start_date = (datetime.now() - timedelta(days=60)).strftime("%Y-%m-%d")
+            
+            df = self.loader.taiwan_stock_daily(
+                stock_id=symbol,
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            if df is not None and not df.empty:
+                # 統一欄位名稱為小寫以方便處理
+                df.columns = [c.lower() for c in df.columns]
+                
+                if 'close' not in df.columns:
+                    print(f"找不到價格欄位。可用欄位: {df.columns.tolist()}")
+                    return None
+                
+                # 計算 MA20
+                df['ma20'] = df['close'].rolling(window=20).mean()
+                
+                last_row = df.iloc[-1]
+                
+                return {
+                    "open": float(last_row.get('open', 0)),
+                    "close": float(last_row.get('close', 0)),
+                    "high": float(last_row.get('high', 0)),
+                    "low": float(last_row.get('low', 0)),
+                    "ma20": round(float(last_row.get('ma20', 0)), 2) if last_row.get('ma20') else None
+                }
+            return None
+        except Exception as e:
+            print(f"獲取詳細統計資料時發生錯誤: {e}")
             return None
 
 if __name__ == "__main__":

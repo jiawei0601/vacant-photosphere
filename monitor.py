@@ -117,6 +117,29 @@ class MarketMonitor:
             return True
         return False
 
+    async def get_detailed_summary(self):
+        """回傳目前所有監控標的的詳細摘要 (開、收、高、低、MA20)"""
+        items = self.notion.get_monitoring_list()
+        if not items:
+            return "目前監控清單為空。"
+            
+        lines = []
+        for item in items:
+            symbol = item['symbol']
+            stats = self.fetcher.get_full_stats(symbol)
+            
+            if not stats:
+                lines.append(f"• **{item['name']}** ({symbol}): 無法獲取詳細資料")
+                continue
+                
+            line = f"• **{item['name']}** ({symbol})\n"
+            line += f"  開: `{stats['open']}` / 收: `{stats['close']}`\n"
+            line += f"  高: `{stats['high']}` / 低: `{stats['low']}`\n"
+            line += f"  MA20: `{stats['ma20'] or '計算中'}`"
+            lines.append(line)
+            
+        return "\n\n".join(lines)
+
     async def change_config_callback(self, interval=None, allow_outside=None):
         """處理來自 Telegram 的系統配置修改請求"""
         if interval is not None:
@@ -147,9 +170,8 @@ class MarketMonitor:
                     # 13:30 收盤總結
                     if curr_time >= dt_time(13, 30) and curr_time < dt_time(13, 50):
                         if self.last_close_date != today:
-                            # 執行最後一筆價格抓取
-                            await self.check_once()
-                            summary = await self.get_summary_callback()
+                            # 獲取詳細摘要
+                            summary = await self.get_detailed_summary()
                             message = f"📉 **台股今日收盤總結**\n\n{summary}\n\n本日監控任務結束，明日再會！"
                             await self.notifier.send_message(message)
                             self.last_close_date = today
