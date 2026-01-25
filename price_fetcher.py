@@ -2,6 +2,7 @@ import os
 import requests
 from FinMind.data import DataLoader
 from dotenv import load_dotenv
+import pandas as pd
 
 load_dotenv()
 
@@ -75,36 +76,55 @@ class PriceFetcher:
                 end_date=end_date
             )
             
-            if df is not None and len(df) > offset:
-                # 統一欄位名稱為小寫以方便處理
+            if df is not None and not df.empty:
+                # 統一欄位名稱為小寫
                 df.columns = [c.lower() for c in df.columns]
+                cols = df.columns.tolist()
+                
+                # 確保必要欄位存在
+                if 'close' not in cols:
+                    print(f"[{symbol}] 缺乏 'close' 欄位。可用欄位: {cols}")
+                    return None
                 
                 # 計算 MA20
                 df['ma20'] = df['close'].rolling(window=20).mean()
                 
+                if len(df) <= offset:
+                    print(f"[{symbol}] 資料不足以計算 offset={offset}。總列數: {len(df)}")
+                    return None
+                    
                 # 取得指定 offset 的資料 (最後一筆是 -1, 前一筆是 -2)
                 idx = -1 - offset
                 last_row = df.iloc[idx]
                 
-                # 取得更前一天的收盤價來計算漲跌幅
+                # 處理漲跌幅
                 change_pct = None
                 if len(df) > abs(idx - 1):
-                    prev_close = float(df.iloc[idx - 1]['close'])
-                    current_close = float(last_row['close'])
-                    if prev_close != 0:
-                        change_pct = round(((current_close - prev_close) / prev_close) * 100, 2)
+                    try:
+                        prev_close = float(df.iloc[idx - 1]['close'])
+                        current_close = float(last_row['close'])
+                        if prev_close != 0:
+                            change_pct = round(((current_close - prev_close) / prev_close) * 100, 2)
+                    except:
+                        pass
                 
                 date_str = last_row.get('date', '未知日期')
+                
+                # 處理最高/最低欄位 (FinMind 有時用 high/low, 有時用 max/min)
+                high_val = last_row.get('max') if 'max' in cols else last_row.get('high', 0)
+                low_val = last_row.get('min') if 'min' in cols else last_row.get('low', 0)
                 
                 return {
                     "date": date_str,
                     "open": float(last_row.get('open', 0)),
                     "close": float(last_row.get('close', 0)),
-                    "high": float(last_row.get('max', 0)),
-                    "low": float(last_row.get('min', 0)),
-                    "ma20": round(float(last_row.get('ma20', 0)), 2) if last_row.get('ma20') else None,
+                    "high": float(high_val),
+                    "low": float(low_val),
+                    "ma20": round(float(last_row.get('ma20', 0)), 2) if not pd.isna(last_row.get('ma20')) else None,
                     "change_pct": change_pct
                 }
+            else:
+                print(f"[{symbol}] API 未回傳有效資料或資料為空")
             return None
         except Exception as e:
             print(f"獲取詳細統計資料時發生錯誤: {e}")
