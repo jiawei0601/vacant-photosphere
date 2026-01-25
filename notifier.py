@@ -186,7 +186,7 @@ class Notifier:
             return
 
         try:
-            await self.app.bot.send_message(chat_id=self.chat_id, text=text)
+            await self.app.bot.send_message(chat_id=self.chat_id, text=text, parse_mode='Markdown')
             print(f"Telegram 訊息已發送: {text}")
         except Exception as e:
             print(f"發送 Telegram 訊息時發生錯誤: {e}")

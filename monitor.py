@@ -17,6 +17,8 @@ class MarketMonitor:
         self.notifier = Notifier()
         self.interval = int(os.getenv("CHECK_INTERVAL_SECONDS", 300))
         self.allow_outside = os.getenv("ALLOW_OUTSIDE_MARKET_HOURS", "false").lower() == "true"
+        self.last_open_date = None
+        self.last_close_date = None
 
     def is_market_open(self):
         """
@@ -129,6 +131,29 @@ class MarketMonitor:
         """背景執行的監控迴圈"""
         while True:
             try:
+                now = datetime.now()
+                today = now.date()
+                curr_time = now.time()
+                is_weekday = now.weekday() <= 4
+
+                # 處理開盤與收盤通知 (僅在非 24H 模式下強制執行，或作為每日常規提醒)
+                if not self.allow_outside and is_weekday:
+                    # 09:00 開盤提醒
+                    if curr_time >= dt_time(9, 0) and curr_time < dt_time(9, 10):
+                        if self.last_open_date != today:
+                            await self.notifier.send_message("☀️ **台股今日開盤**！\n系統已開始監控...")
+                            self.last_open_date = today
+                    
+                    # 13:30 收盤總結
+                    if curr_time >= dt_time(13, 30) and curr_time < dt_time(13, 50):
+                        if self.last_close_date != today:
+                            # 執行最後一筆價格抓取
+                            await self.check_once()
+                            summary = await self.get_summary_callback()
+                            message = f"📉 **台股今日收盤總結**\n\n{summary}\n\n本日監控任務結束，明日再會！"
+                            await self.notifier.send_message(message)
+                            self.last_close_date = today
+
                 if self.is_market_open():
                     await self.check_once()
                 else:
