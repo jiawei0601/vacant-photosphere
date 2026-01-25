@@ -89,8 +89,8 @@ class PriceFetcher:
                     "date": date_str,
                     "open": float(last_row.get('open', 0)),
                     "close": float(last_row.get('close', 0)),
-                    "high": float(last_row.get('high', 0)),
-                    "low": float(last_row.get('low', 0)),
+                    "high": float(last_row.get('max', 0)),
+                    "low": float(last_row.get('min', 0)),
                     "ma20": round(float(last_row.get('ma20', 0)), 2) if last_row.get('ma20') else None
                 }
             return None
