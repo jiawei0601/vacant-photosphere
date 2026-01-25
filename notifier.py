@@ -21,11 +21,14 @@ class Notifier:
             self.app.add_handler(CommandHandler("show", self._show_command))
             self.app.add_handler(CommandHandler("sethigh", self._set_high_command))
             self.app.add_handler(CommandHandler("setlow", self._set_low_command))
+            self.app.add_handler(CommandHandler("interval", self._set_interval_command))
+            self.app.add_handler(CommandHandler("mode", self._set_mode_command))
             self.app.add_handler(CommandHandler("help", self._help_command))
             from telegram.ext import MessageHandler, filters
             self.app.add_handler(MessageHandler(filters.ALL, self._debug_handler))
             self.data_callback = None
             self.alert_callback = None
+            self.config_callback = None
 
     async def _debug_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
@@ -39,7 +42,9 @@ class Notifier:
                 "• /list - 顯示目前已暫停警報的清單\n\n"
                 "⚙️ 設定功能\n"
                 "• /sethigh [代碼] [價格] - 設定上限警戒值\n"
-                "• /setlow [代碼] [價格] - 設定下限警戒值\n\n"
+                "• /setlow [代碼] [價格] - 設定下限警戒值\n"
+                "• /interval [秒數] - 設定檢查頻率 (至少 60 秒)\n"
+                "• /mode [on/off] - 是否開啟交易時段外監控\n\n"
                 "🔔 警報控制\n"
                 "• /stop [代碼] - 暫停特定標的的持續警報\n"
                 "• /start [代碼] - 恢復特定標的的監控\n\n"
@@ -56,6 +61,40 @@ class Notifier:
     def set_alert_callback(self, callback):
         """設定用於更新警戒價格的回呼函式"""
         self.alert_callback = callback
+
+    def set_config_callback(self, callback):
+        """設定用於更新系統配置的回呼函式"""
+        self.config_callback = callback
+
+    async def _set_interval_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not context.args:
+            await update.message.reply_text("請提供秒數，例如：/interval 300")
+            return
+        
+        try:
+            seconds = int(context.args[0])
+            if seconds < 60:
+                await update.message.reply_text("為了避免被 API 封鎖，間隔請至少設定為 60 秒。")
+                return
+            
+            if self.config_callback:
+                await self.config_callback(interval=seconds)
+                await update.message.reply_text(f"✅ 已將檢查間隔更新為 {seconds} 秒。")
+        except ValueError:
+            await update.message.reply_text("請輸入有效的數字。")
+
+    async def _set_mode_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not context.args:
+            await update.message.reply_text("請提供參數，例如：/mode on 或 /mode off")
+            return
+        
+        mode = context.args[0].lower()
+        allow = True if mode == "on" else False
+        
+        if self.config_callback:
+            await self.config_callback(allow_outside=allow)
+            status = "開啟" if allow else "關閉"
+            await update.message.reply_text(f"✅ 已{status}交易時段外監控。")
 
     async def _set_high_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(context.args) < 2:

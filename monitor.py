@@ -115,6 +115,16 @@ class MarketMonitor:
             return True
         return False
 
+    async def change_config_callback(self, interval=None, allow_outside=None):
+        """處理來自 Telegram 的系統配置修改請求"""
+        if interval is not None:
+            self.interval = interval
+            print(f"系統檢查間隔已更變為: {self.interval} 秒")
+        
+        if allow_outside is not None:
+            self.allow_outside = allow_outside
+            print(f"交易時段外處理已變更為: {self.allow_outside}")
+
     async def run_monitor_loop(self):
         """背景執行的監控迴圈"""
         while True:
@@ -135,6 +145,7 @@ class MarketMonitor:
         # 串接指令回呼
         self.notifier.set_data_callback(self.get_summary_callback)
         self.notifier.set_alert_callback(self.change_alert_callback)
+        self.notifier.set_config_callback(self.change_config_callback)
         
         # 獲取 Telegram Application
         app = self.notifier.app
