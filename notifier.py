@@ -61,13 +61,16 @@ class Notifier:
             await update.message.reply_text("系統尚未準備好，請稍後再試。")
             return
             
-        # 我們重複使用 data_callback，但需要知道如何請求前一日資料
-        # 這裡我們稍微修改機制，讓回呼可以接受參數
-        summary = await self.data_callback(offset=1)
-        if not summary:
-            await update.message.reply_text("無法獲取前一交易日資料。")
-        else:
-            await update.message.reply_text(f"📊 **前一交易日收盤報告**\n\n{summary}", parse_mode='Markdown')
+        try:
+            # 請求前一交易日資料
+            summary = await self.data_callback(offset=1)
+            if not summary:
+                await update.message.reply_text("無法獲取前一交易日資料 (可能資料尚未更新或 API 限制)。")
+            else:
+                await update.message.reply_text(f"📊 **前一交易日收盤報告**\n\n{summary}", parse_mode='Markdown')
+        except Exception as e:
+            await update.message.reply_text(f"❌ 執行 /prev 時發生錯誤: {e}")
+            print(f"Error in _prev_command: {e}")
 
     def set_data_callback(self, callback):
         """設定用於獲取標的摘要的回呼函式"""
@@ -150,11 +153,15 @@ class Notifier:
             await update.message.reply_text("系統尚未準備好，請稍後再試。")
             return
             
-        summary = await self.data_callback()
-        if not summary:
-            await update.message.reply_text("目前的監控清單為空。")
-        else:
-            await update.message.reply_text(f"📊 **目前監控清單摘要**\n\n{summary}", parse_mode='Markdown')
+        try:
+            summary = await self.data_callback()
+            if not summary:
+                await update.message.reply_text("目前的監控清單為空。")
+            else:
+                await update.message.reply_text(f"📊 **目前監控清單摘要**\n\n{summary}", parse_mode='Markdown')
+        except Exception as e:
+            await update.message.reply_text(f"❌ 執行 /show 時發生錯誤: {e}")
+            print(f"Error in _show_command: {e}")
 
     async def _stop_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not context.args:
