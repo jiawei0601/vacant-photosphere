@@ -33,24 +33,18 @@ class PriceFetcher:
             )
             
             if df is not None and not df.empty:
-                # 取得最後一列的收盤價，處理大小寫問題
-                if 'Close' in df.columns:
-                    return float(df.iloc[-1]['Close'])
-                elif 'close' in df.columns:
-                    return float(df.iloc[-1]['close'])
-                else:
-                    print(f"找不到價格欄位。可用欄位: {df.columns.tolist()}")
-                    return None
-            else:
-                # 嘗試另一種介面 (部分權證或即時資料可能在此)
-                df = self.loader.taiwan_stock_daily_short(stock_id=symbol)
-                if df is not None and not df.empty:
-                    if 'close' in df.columns:
-                        return float(df.iloc[-1]['close'])
-                    elif 'Close' in df.columns:
-                        return float(df.iloc[-1]['Close'])
+                # 統一欄位名稱為小寫
+                df.columns = [c.lower() for c in df.columns]
+                if 'close' in df.columns:
+                    # 取得最後一筆非 NaN 的收盤價
+                    non_nan_df = df.dropna(subset=['close'])
+                    if not non_nan_df.empty:
+                        return float(non_nan_df.iloc[-1]['close'])
                 
-                print(f"找不到代碼 {symbol} 的價格資料")
+                print(f"[{symbol}] 找不到有效的 'close' 欄位資料。可用欄位: {df.columns.tolist()}")
+                return None
+            else:
+                print(f"[{symbol}] taiwan_stock_daily 未回傳資料。")
                 return None
             return None
         except Exception as e:
