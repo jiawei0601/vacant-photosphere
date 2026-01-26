@@ -163,6 +163,10 @@ class MarketMonitor:
             self.allow_outside = allow_outside
             print(f"交易時段外處理已變更為: {self.allow_outside}")
 
+    async def get_market_callback(self):
+        """回傳市場指數資料"""
+        return self.fetcher.get_market_indices()
+
     async def run_monitor_loop(self):
         """背景執行的監控迴圈"""
         while True:
@@ -209,6 +213,7 @@ class MarketMonitor:
         self.notifier.set_data_callback(self.get_summary_callback)
         self.notifier.set_alert_callback(self.change_alert_callback)
         self.notifier.set_config_callback(self.change_config_callback)
+        self.notifier.set_market_callback(self.get_market_callback)
         
         # 獲取 Telegram Application
         app = self.notifier.app

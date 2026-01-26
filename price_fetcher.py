@@ -14,7 +14,7 @@ class PriceFetcher:
             print("正在使用 Token 登入 FinMind...")
             self.loader.login_by_token(api_token=self.api_token)
         else:
-            print("⚠️ 警告: 未設定 FINMIND_TOKEN，可能導致 API 存取受限或失敗")
+            print("警告: 未設定 FINMIND_TOKEN，可能導致 API 存取受限或失敗")
 
     def get_last_price(self, symbol):
         """
@@ -124,9 +124,73 @@ class PriceFetcher:
             print(f"獲取詳細統計資料時發生錯誤: {e}")
             return None
 
+    def get_market_indices(self):
+        """
+        獲取主要市場指數 (台股、NASDAQ、商品期貨)
+        """
+        try:
+            import yfinance as yf
+            
+            # 定義要抓取的代碼
+            # ^TWII: 台灣加權指數
+            # ^IXIC: NASDAQ Composite
+            # GC=F: 黃金期貨
+            # SI=F: 白銀期貨
+            # HG=F: 銅期貨
+            tickers = {
+                "🇹🇼 台股加權": "^TWII",
+                "🇺🇸 NASDAQ": "^IXIC",
+                "💰 黃金": "GC=F",
+                "🪙 白銀": "SI=F",
+                "🔩 銅": "HG=F"
+            }
+            
+            data_list = []
+            
+            # 一次性抓取以節省請求
+            # yfinance 支援多個 tickers 一起抓，但為了處理方便與錯誤隔離，這裡逐一抓取或分批
+            # 這裡使用 Tickers 物件一次抓取
+            symbols_str = " ".join(tickers.values())
+            result = yf.Tickers(symbols_str)
+            
+            for name, symbol in tickers.items():
+                try:
+                    ticker = result.tickers[symbol]
+                    # fast_info 有時比較快且即時
+                    price = ticker.fast_info.last_price
+                    prev_close = ticker.fast_info.previous_close
+                    
+                    if price and prev_close:
+                        change_pct = ((price - prev_close) / prev_close) * 100
+                        emoji = "🔴" if change_pct > 0 else "🟢" if change_pct < 0 else "⚪"
+                        
+                        data_list.append({
+                            "name": name,
+                            "price": price,
+                            "change_pct": change_pct,
+                            "emoji": emoji
+                        })
+                    else:
+                        data_list.append({"name": name, "price": 0, "change_pct": 0, "emoji": "⚠️"})
+                        
+                except Exception as ex:
+                    print(f"抓取 {name} ({symbol}) 失敗: {ex}")
+                    data_list.append({"name": name, "price": 0, "change_pct": 0, "emoji": "❌"})
+            
+            return data_list
+            
+        except Exception as e:
+            print(f"獲取市場指數時發生錯誤: {e}")
+            return []
+
 if __name__ == "__main__":
     # 簡單測試
     fetcher = PriceFetcher()
-    test_symbol = "2330" # 台積電
-    price = fetcher.get_last_price(test_symbol)
-    print(f"[{test_symbol}] 當前價格: {price}")
+    # test_symbol = "2330" # 台積電
+    # price = fetcher.get_last_price(test_symbol)
+    # print(f"[{test_symbol}] 當前價格: {price}")
+    
+    print("--- 市場指數測試 ---")
+    indices = fetcher.get_market_indices()
+    for item in indices:
+        print(f"{item['name']}: {item['price']:.2f} ({item['emoji']} {item['change_pct']:.2f}%)")

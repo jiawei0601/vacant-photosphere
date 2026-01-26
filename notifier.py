@@ -24,12 +24,14 @@ class Notifier:
             self.app.add_handler(CommandHandler("interval", self._set_interval_command))
             self.app.add_handler(CommandHandler("mode", self._set_mode_command))
             self.app.add_handler(CommandHandler("prev", self._prev_command))
+            self.app.add_handler(CommandHandler("market", self._market_command)) # New command
             self.app.add_handler(CommandHandler("help", self._help_command))
             from telegram.ext import MessageHandler, filters
             self.app.add_handler(MessageHandler(filters.ALL, self._debug_handler))
             self.data_callback = None
             self.alert_callback = None
             self.config_callback = None
+            self.market_callback = None # New callback
 
     async def _debug_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
@@ -40,6 +42,8 @@ class Notifier:
                 "📌 可用指令清單\n\n"
                 "🔍 查詢功能\n"
                 "• /show all - 顯示目前 Notion 中所有標的摘要\n"
+                "• /show list - 顯示目前監控清單 (同上)\n"
+                "• /market - 顯示主要市場指數 (台股、美股、貴金屬)\n"
                 "• /prev - 顯示前一交易日的完整收盤報告\n"
                 "• /list - 顯示目前已暫停警報的清單\n\n"
                 "⚙️ 設定功能\n"
@@ -83,6 +87,10 @@ class Notifier:
     def set_config_callback(self, callback):
         """設定用於更新系統配置的回呼函式"""
         self.config_callback = callback
+        
+    def set_market_callback(self, callback):
+        """設定用於獲取市場指數的回呼函式"""
+        self.market_callback = callback
 
     async def _set_interval_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not context.args:
@@ -154,14 +162,46 @@ class Notifier:
             return
             
         try:
+            # 支援 /show list 作為別名
+            show_type = "all"
+            if context.args and context.args[0].lower() == "list":
+                show_type = "list"
+                
             summary = await self.data_callback()
             if not summary:
                 await update.message.reply_text("目前的監控清單為空。")
             else:
-                await update.message.reply_text(f"📊 **目前監控清單摘要**\n\n{summary}", parse_mode='Markdown')
+                title = "📊 **目前監控清單摘要**" if show_type != "list" else "📋 **目前監控清單**"
+                await update.message.reply_text(f"{title}\n\n{summary}", parse_mode='Markdown')
         except Exception as e:
             await update.message.reply_text(f"❌ 執行 /show 時發生錯誤: {e}")
             print(f"Error in _show_command: {e}")
+
+    async def _market_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.market_callback:
+            await update.message.reply_text("系統尚未準備好，請稍後再試。")
+            return
+        
+        try:
+            await update.message.reply_text("🔄 正從國際市場獲取數據中...")
+            market_data = await self.market_callback()
+            
+            if not market_data:
+                await update.message.reply_text("無法獲取市場數據。")
+                return
+
+            lines = []
+            for item in market_data:
+                price_str = f"{item['price']:,.2f}"
+                change_str = foo = f"{item['change_pct']:+.2f}%"
+                lines.append(f"{item['name']}: `{price_str}` ({item['emoji']} {change_str})")
+            
+            msg = "🌍 **全球重要市場指數**\n\n" + "\n".join(lines)
+            await update.message.reply_text(msg, parse_mode='Markdown')
+            
+        except Exception as e:
+             await update.message.reply_text(f"❌ 執行 /market 時發生錯誤: {e}")
+             print(f"Error in _market_command: {e}")
 
     async def _stop_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not context.args:
@@ -215,3 +255,4 @@ class Notifier:
 
     def is_stopped(self, symbol):
         return symbol.upper() in self.stopped_symbols
+
