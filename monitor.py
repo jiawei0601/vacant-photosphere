@@ -21,6 +21,7 @@ class MarketMonitor:
         self.last_close_date = None
         self.last_noon_date = None
         self.last_daily_report_date = None
+        self.last_order_stats_date = None
 
     def is_market_open(self):
         """
@@ -262,6 +263,27 @@ class MarketMonitor:
                             message = f"🔔 **每日追蹤標的盤後報告 (14:00)**\n\n{summary}"
                             await self.notifier.send_message(message)
                             self.last_daily_report_date = today
+                    
+                    # 13:45 全市場買賣力道報告
+                    if curr_time >= dt_time(13, 45) and curr_time < dt_time(14, 5):
+                        if self.last_order_stats_date != today:
+                            stats = self.fetcher.get_market_order_stats()
+                            if stats:
+                                diff_vol = stats['total_buy_volume'] - stats['total_sell_volume']
+                                sentiment = "🐂 偏多" if diff_vol > 0 else "🐻 偏空"
+                                message = (
+                                    f"📊 **台股全市場委託成交統計 (13:45)**\n\n"
+                                    f"• 委買金額單位: 5秒統計\n"
+                                    f"• 總委買筆數: `{stats['total_buy_order']:,}`\n"
+                                    f"• 總委賣筆數: `{stats['total_sell_order']:,}`\n"
+                                    f"• 總委買成交量: `{stats['total_buy_volume']:,}`\n"
+                                    f"• 總委賣成交量: `{stats['total_sell_volume']:,}`\n"
+                                    f"• 買賣量差: `{diff_vol:+,}`\n"
+                                    f"• 市場氣氛: **{sentiment}**\n\n"
+                                    f"(數據時間: {stats['time']})"
+                                )
+                                await self.notifier.send_message(message)
+                                self.last_order_stats_date = today
 
                 if self.is_market_open():
                     await self.check_once()

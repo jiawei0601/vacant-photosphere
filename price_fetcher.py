@@ -354,6 +354,36 @@ class PriceFetcher:
             print(f"獲取 {symbol} MA 時發生錯誤: {e}")
             return None, None
 
+    def get_market_order_stats(self):
+        """
+        獲取台股全市場每 5 秒委託成交統計 (買賣力道)
+        資料集: TaiwanStockStatisticsOfOrderBookAndTrade
+        """
+        try:
+            from datetime import datetime
+            today = datetime.now().strftime("%Y-%m-%d")
+            
+            # 使用通用 get_data 獲取資料
+            df = self.loader.get_data(
+                dataset="TaiwanStockStatisticsOfOrderBookAndTrade",
+                start_date=today
+            )
+            
+            if df is not None and not df.empty:
+                # 取得最後一筆 (13:30 收盤後的統計資訊)
+                last_row = df.iloc[-1]
+                return {
+                    "time": last_row.get("time", "---"),
+                    "total_buy_order": int(last_row.get("total_buy_order", 0)),
+                    "total_sell_order": int(last_row.get("total_sell_order", 0)),
+                    "total_buy_volume": int(last_row.get("total_buy_volume", 0)),
+                    "total_sell_volume": int(last_row.get("total_sell_volume", 0)),
+                }
+            return None
+        except Exception as e:
+            print(f"獲取市場買賣力道時發生錯誤: {e}")
+            return None
+
     def get_market_indices(self):
         """
         獲取主要市場指數 (台股、美股、能源、匯率、加密貨幣)
