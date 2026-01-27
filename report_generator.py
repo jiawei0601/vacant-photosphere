@@ -14,24 +14,42 @@ class ReportGenerator:
         
         # Try to find a font that supports Chinese. 
         self.font_path = None
+        
+        # 優先順序: 1. 專案路徑下的字體 2. 系統字體
         potential_fonts = [
-            "C:/Windows/Fonts/msjh.ttc",  # Windows - Microsoft JhengHei
+            # 專案本地字體 (建議使用者上傳一個字體到此路徑以確保不同環境一致)
+            "assets/fonts/msjh.ttc",
+            "assets/fonts/NotoSansTC-Regular.otf",
+            "assets/fonts/font.ttc",
+            "assets/fonts/font.ttf",
+            
+            # Windows 字體
+            "C:/Windows/Fonts/msjh.ttc",  # Microsoft JhengHei
             "C:/Windows/Fonts/msjh.ttf",
             "C:/Windows/Fonts/msjhl.ttc",
             "C:/Windows/Fonts/mingliu.ttc",
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", # Linux - Noto
+            
+            # Linux (Railway) 常用字體路徑
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
             "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", # Linux - WenQuanYi
-            "/usr/share/fonts/truetype/droid/DroidSansFallback.ttf", # Linux fallback
+            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+            "/usr/share/fonts/truetype/droid/DroidSansFallback.ttf",
             "/usr/share/fonts/truetype/arphic/uming.ttc",
+            "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
         ]
+        
         for f in potential_fonts:
-            if os.path.exists(f):
-                self.font_path = f
+            # 檢查絕對路徑或相對路徑
+            target = f if os.path.isabs(f) else os.path.join(os.getcwd(), f)
+            if os.path.exists(target):
+                self.font_path = target
+                print(f"✅ 已找到字體庫: {self.font_path}")
                 break
         
         if not self.font_path:
-            print("⚠️ 警告: 未找到中文字體，圖片中的中文可能無法正常顯示。")
+            print("⚠️ 警告: 系統找不到中文字體，圖片中的中文將顯示為亂碼。")
+            print("💡 建議: 請下載一個支援中文的字體檔 (如 NotoSansTC-Regular.otf) 並放至 assets/fonts/ 資料夾下。")
 
     def generate_closing_report(self, sentiment_data, stock_list, output_path="closing_report.png"):
         """
