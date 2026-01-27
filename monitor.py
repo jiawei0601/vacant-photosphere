@@ -175,6 +175,10 @@ class MarketMonitor:
         """回傳市場指數資料"""
         return self.fetcher.get_market_indices()
 
+    async def get_api_usage_callback(self):
+        """回傳 API 使用量資訊"""
+        return self.fetcher.get_api_usage()
+
     async def get_stock_history_callback(self, symbol):
         """回傳特定股票的五日歷史數據摘要"""
         stats_list = self.fetcher.get_five_day_stats(symbol)
@@ -243,6 +247,7 @@ class MarketMonitor:
         self.notifier.set_config_callback(self.change_config_callback)
         self.notifier.set_market_callback(self.get_market_callback)
         self.notifier.set_check_callback(self.check_once)
+        self.notifier.set_api_usage_callback(self.get_api_usage_callback)
         self.notifier.set_stock_history_callback(self.get_stock_history_callback)
         
         # 獲取 Telegram Application

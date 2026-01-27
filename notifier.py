@@ -26,6 +26,7 @@ class Notifier:
             self.app.add_handler(CommandHandler("prev", self._prev_command))
             self.app.add_handler(CommandHandler("market", self._market_command)) # New command
             self.app.add_handler(CommandHandler("check", self._check_command)) # New command
+            self.app.add_handler(CommandHandler("apicheck", self._api_usage_command)) # New command
             self.app.add_handler(CommandHandler("help", self._help_command))
             from telegram.ext import MessageHandler, filters
             self.app.add_handler(MessageHandler(filters.ALL, self._debug_handler))
@@ -34,6 +35,7 @@ class Notifier:
             self.config_callback = None
             self.market_callback = None # New callback
             self.check_callback = None # New callback
+            self.api_usage_callback = None # New callback
             self.stock_history_callback = None # New callback
 
     async def _debug_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -49,6 +51,7 @@ class Notifier:
                 "• /market - 顯示主要市場指數 (台股、美股、貴金屬)\n"
                 "• /prev - 顯示前一交易日的完整收盤報告\n"
                 "• /check - 立即執行一次價格檢查與警報觸發\n"
+                "• /apicheck - 查詢 FinMind API 剩餘額度\n"
                 "• /list [代碼] - 顯示代碼近五日詳細數據\n"
                 "• /alist - 顯示目前已暫停警報的清單\n\n"
                 "⚙️ 設定功能\n"
@@ -100,6 +103,10 @@ class Notifier:
     def set_check_callback(self, callback):
         """設定用於立即檢查價格的回呼函式"""
         self.check_callback = callback
+
+    def set_api_usage_callback(self, callback):
+        """設定用於獲取 API 使用量的回呼函式"""
+        self.api_usage_callback = callback
 
     def set_stock_history_callback(self, callback):
         """設定用於獲取股票歷史數據的回呼函式"""
@@ -238,6 +245,30 @@ class Notifier:
         except Exception as e:
             await update.message.reply_text(f"❌ 執行檢查時發生錯誤: {e}")
             print(f"Error in _check_command: {e}")
+
+    async def _api_usage_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.api_usage_callback:
+            await update.message.reply_text("系統尚未準備好，請稍後再試。")
+            return
+        
+        try:
+            usage = await self.api_usage_callback()
+            if not usage:
+                await update.message.reply_text("無法獲取 API 使用資訊，可能是未設定 Token。")
+            else:
+                current = usage['user_count']
+                limit = usage['api_request_limit']
+                percent = round((current / limit) * 100, 2) if limit > 0 else 0
+                msg = (
+                    "📊 **FinMind API 使用量查詢**\n\n"
+                    f"• 目前已使用: `{current}`\n"
+                    f"• 每小時上限: `{limit}`\n"
+                    f"• 已用百分比: `{percent}%`"
+                )
+                await update.message.reply_text(msg, parse_mode='Markdown')
+        except Exception as e:
+            await update.message.reply_text(f"❌ 查詢時發生錯誤: {e}")
+            print(f"Error in _api_usage_command: {e}")
 
     async def _stop_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not context.args:

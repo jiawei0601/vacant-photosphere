@@ -193,6 +193,28 @@ class PriceFetcher:
             print(f"獲取詳細統計資料時發生錯誤: {e}")
             return None
 
+    def get_api_usage(self):
+        """
+        獲取 FinMind API 的使用次數與上限
+        """
+        if not self.api_token:
+            return None
+            
+        try:
+            url = "https://api.web.finmindtrade.com/v2/user_info"
+            response = requests.get(url, params={"token": self.api_token})
+            data = response.json()
+            
+            if data.get("msg") == "success":
+                return {
+                    "user_count": data.get("user_count"),
+                    "api_request_limit": data.get("api_request_limit")
+                }
+            return None
+        except Exception as e:
+            print(f"獲取 API 使用量時發生錯誤: {e}")
+            return None
+
     def get_market_indices(self):
         """
         獲取主要市場指數 (台股、NASDAQ、商品期貨)
