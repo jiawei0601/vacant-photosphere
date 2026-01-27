@@ -11,6 +11,8 @@ class ReportGenerator:
         self.up_color = "#FF4B4B"  # Red for Up (Taiwan style)
         self.down_color = "#00FA9A" # Green for Down (Taiwan style)
         self.accent_color = "#00D1FF"
+        self.ma5_color = "#FFD700"  # Yellow for MA5
+        self.ma20_color = "#00FFFF" # Cyan for MA20
         
         # Try to find a font that supports Chinese. 
         self.font_path = None
@@ -208,6 +210,27 @@ class ReportGenerator:
             
             # Date
             draw.text((cx - 30, chart_y + chart_h + 10), s['date'][-5:], font=small_font, fill="#AAAAAA")
+
+        # --- Draw MA Lines ---
+        ma5_points = []
+        ma20_points = []
+        for i, s in enumerate(stats_list):
+            cx = chart_x + spacing * (i + 1)
+            if s.get('ma5'):
+                ma5_points.append((cx, get_y(s['ma5'])))
+            if s.get('ma20'):
+                ma20_points.append((cx, get_y(s['ma20'])))
+        
+        if len(ma5_points) > 1:
+            draw.line(ma5_points, fill=self.ma5_color, width=2)
+        if len(ma20_points) > 1:
+            draw.line(ma20_points, fill=self.ma20_color, width=2)
+            
+        # Legend for MA lines
+        draw.line([chart_x + chart_w - 200, 50, chart_x + chart_w - 150, 50], fill=self.ma5_color, width=3)
+        draw.text((chart_x + chart_w - 145, 40), "MA5", font=small_font, fill=self.text_color)
+        draw.line([chart_x + chart_w - 100, 50, chart_x + chart_w - 50, 50], fill=self.ma20_color, width=3)
+        draw.text((chart_x + chart_w - 45, 40), "MA20", font=small_font, fill=self.text_color)
             
         # --- Volume Bar Chart ---
         vol_y = 580
