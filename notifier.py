@@ -26,6 +26,7 @@ class Notifier:
             self.app.add_handler(CommandHandler("mode", self._set_mode_command))
             self.app.add_handler(CommandHandler("prev", self._prev_command))
             self.app.add_handler(CommandHandler("show", self._show_command))
+            self.app.add_handler(CommandHandler("showlist", self._show_list_command))
             self.app.add_handler(CommandHandler("market", self._market_command))
             self.app.add_handler(CommandHandler("check", self._check_command)) # New command
             self.app.add_handler(CommandHandler("apicheck", self._api_usage_command)) # New command
@@ -43,6 +44,7 @@ class Notifier:
             self.test_callback = None # New callback
             self.report_callback = None # New callback
             self.stock_chart_callback = None # New callback
+            self.monitoring_list_callback = None # New callback
 
     async def _debug_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
@@ -60,6 +62,7 @@ class Notifier:
                 "• `/test [類別]` - 手動測試報告 (noon/sentiment/daily)\n\n"
                 "📋 **監控與報告**\n"
                 "• `/show` - 顯示目前所有監控中的標的報價清單\n"
+                "• `/showlist` - 顯示目前所有追蹤標的與警報上下限\n"
                 "• `/prev` - 顯示前一交易日的完整盤後總結報告\n"
                 "• `/alist` - 顯示目前「已暫停警報」的標的清單\n\n"
                 "⚙️ **警報管理**\n"
@@ -137,6 +140,10 @@ class Notifier:
     def set_stock_chart_callback(self, callback):
         """設定用於獲取股票 K 線圖回呼函式"""
         self.stock_chart_callback = callback
+    
+    def set_monitoring_list_callback(self, callback):
+        """設定用於獲取監控清單回呼函式"""
+        self.monitoring_list_callback = callback
 
     async def _set_interval_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not context.args:
@@ -395,6 +402,22 @@ class Notifier:
         except Exception as e:
             await update.message.reply_text(f"❌ 查詢時發生錯誤: {e}")
             print(f"Error in _show_command: {e}")
+
+    async def _show_list_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """顯示目前追蹤標的與上下限清單"""
+        if not self.monitoring_list_callback:
+            await update.message.reply_text("系統尚未準備好，請稍後再試。")
+            return
+            
+        try:
+            msg = await self.monitoring_list_callback()
+            if not msg:
+                await update.message.reply_text("目前監控清單為空。")
+            else:
+                await update.message.reply_text(msg, parse_mode='Markdown')
+        except Exception as e:
+            await update.message.reply_text(f"❌ 查詢清單時發生錯誤: {e}")
+            print(f"Error in _show_list_command: {e}")
 
     async def _test_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """手動觸發測試報告"""

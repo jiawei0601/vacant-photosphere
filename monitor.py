@@ -284,6 +284,20 @@ class MarketMonitor:
             print(f"回調產生 K 線圖失敗: {e}")
             return None
 
+    async def get_monitoring_limits_callback(self):
+        """獲取目前監控清單與警戒上下限摘要"""
+        items = self.notion.get_monitoring_list()
+        if not items:
+            return None
+            
+        lines = ["📋 **目前追蹤標的與警報設定**\n"]
+        for item in items:
+            high = f"`{item['high_alert']}`" if item['high_alert'] is not None else "`未設定`"
+            low = f"`{item['low_alert']}`" if item['low_alert'] is not None else "`未設定`"
+            lines.append(f"• **{item['name']}** ({item['symbol']})\n  上限: {high} / 下限: {low}")
+            
+        return "\n".join(lines)
+
     async def test_report_callback(self, report_type):
         """用於測試發送各種自動化報告"""
         today = self._get_now_taipei().date()
@@ -427,6 +441,7 @@ class MarketMonitor:
         self.notifier.set_test_callback(self.test_report_callback)
         self.notifier.set_report_callback(self.get_graphical_report_callback)
         self.notifier.set_stock_chart_callback(self.get_stock_chart_callback)
+        self.notifier.set_monitoring_list_callback(self.get_monitoring_limits_callback)
         
         # 獲取 Telegram Application
         app = self.notifier.app
