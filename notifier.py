@@ -17,8 +17,8 @@ class Notifier:
             self.app = ApplicationBuilder().token(self.token).build()
             self.app.add_handler(CommandHandler("stop", self._stop_command))
             self.app.add_handler(CommandHandler("start", self._start_command))
+            self.app.add_handler(CommandHandler("alist", self._alist_command))
             self.app.add_handler(CommandHandler("list", self._list_command))
-            self.app.add_handler(CommandHandler("show", self._show_command))
             self.app.add_handler(CommandHandler("sethigh", self._set_high_command))
             self.app.add_handler(CommandHandler("setlow", self._set_low_command))
             self.app.add_handler(CommandHandler("interval", self._set_interval_command))
@@ -46,8 +46,8 @@ class Notifier:
                 "• /show list - 顯示目前監控清單 (同上)\n"
                 "• /market - 顯示主要市場指數 (台股、美股、貴金屬)\n"
                 "• /prev - 顯示前一交易日的完整收盤報告\n"
-                "• /list [代碼] - 顯示代碼近五日詳細數據 (不帶代碼則顯示暫停清單)\n"
-                "• /list - 顯示目前已暫停警報的清單\n\n"
+                "• /list [代碼] - 顯示代碼近五日詳細數據\n"
+                "• /alist - 顯示目前已暫停警報的清單\n\n"
                 "⚙️ 設定功能\n"
                 "• /sethigh [代碼] [價格] - 設定上限警戒值\n"
                 "• /setlow [代碼] [價格] - 設定下限警戒值\n"
@@ -231,29 +231,33 @@ class Notifier:
             await update.message.reply_text(f"{symbol} 目前不在停止清單中。")
 
     async def _list_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if context.args:
-            # 如果有提供代碼，執行查詢五日數據功能
-            symbol = context.args[0].upper()
-            if not self.stock_history_callback:
-                await update.message.reply_text("系統尚未準備好，請稍後再試。")
-                return
+        if not context.args:
+            await update.message.reply_text("請提供要查詢的代碼，例如：/list 2330")
+            return
             
-            try:
-                await update.message.reply_text(f"🔄 正在查詢 {symbol} 的五日數據...")
-                history_msg = await self.stock_history_callback(symbol)
-                if not history_msg:
-                    await update.message.reply_text(f"找不到 {symbol} 的數據或 API 暫時無法連線。")
-                else:
-                    await update.message.reply_text(history_msg, parse_mode='Markdown')
-            except Exception as e:
-                await update.message.reply_text(f"❌ 查詢時發生錯誤: {e}")
-                print(f"Error in _list_command (history): {e}")
-        else:
-            # 原有的顯示停止清單功能
-            if not self.stopped_symbols:
-                await update.message.reply_text("目前沒有停止任何警報。")
+        # 如果有提供代碼，執行查詢五日數據功能
+        symbol = context.args[0].upper()
+        if not self.stock_history_callback:
+            await update.message.reply_text("系統尚未準備好，請稍後再試。")
+            return
+        
+        try:
+            await update.message.reply_text(f"🔄 正在查詢 {symbol} 的五日數據...")
+            history_msg = await self.stock_history_callback(symbol)
+            if not history_msg:
+                await update.message.reply_text(f"找不到 {symbol} 的數據或 API 暫時無法連線。")
             else:
-                await update.message.reply_text(f"目前停止警報清單：{', '.join(self.stopped_symbols)}")
+                await update.message.reply_text(history_msg, parse_mode='Markdown')
+        except Exception as e:
+            await update.message.reply_text(f"❌ 查詢時發生錯誤: {e}")
+            print(f"Error in _list_command (history): {e}")
+
+    async def _alist_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """顯示目前的暫停警報清單"""
+        if not self.stopped_symbols:
+            await update.message.reply_text("目前沒有停止任何警報。")
+        else:
+            await update.message.reply_text(f"目前停止警報清單：{', '.join(self.stopped_symbols)}")
 
     async def start_listening(self):
         """啟動機器人監聽指令"""
