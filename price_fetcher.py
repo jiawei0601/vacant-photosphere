@@ -3,6 +3,7 @@ import requests
 from FinMind.data import DataLoader
 from dotenv import load_dotenv
 import pandas as pd
+import yfinance as yf
 
 load_dotenv()
 
@@ -240,39 +241,48 @@ class PriceFetcher:
 
     def get_market_indices(self):
         """
-        獲取主要市場指數 (台股、NASDAQ、商品期貨)
+        獲取主要市場指數 (台股、美股、能源、匯率、加密貨幣)
+        使用 yfinance 擷取資料
         """
         try:
-            import yfinance as yf
-            
             # 定義要抓取的代碼
             # ^TWII: 台灣加權指數
+            # ^DJI: 道瓊工業指數
+            # ^GSPC: S&P 500
             # ^IXIC: NASDAQ Composite
+            # ^SOX: 費城半導體指數
             # GC=F: 黃金期貨
-            # SI=F: 白銀期貨
-            # HG=F: 銅期貨
-            tickers = {
+            # CL=F: 原油期貨
+            # TWD=X: 美元/台幣 (yfinance 通常是用 1 美元兌換多少台幣)
+            # BTC-USD: 比特幣
+            tickers_map = {
                 "🇹🇼 台股加權": "^TWII",
+                "🇺🇸 道瓊": "^DJI",
+                "🇺🇸 S&P 500": "^GSPC",
                 "🇺🇸 NASDAQ": "^IXIC",
+                "🇺🇸 費城半導體": "^SOX",
                 "💰 黃金": "GC=F",
-                "🪙 白銀": "SI=F",
-                "🔩 銅": "HG=F"
+                "🛢️ 原油": "CL=F",
+                "💵 美元/台幣": "TWD=X",
+                "₿ 比特幣": "BTC-USD"
             }
             
             data_list = []
+            symbols = list(tickers_map.values())
             
-            # 一次性抓取以節省請求
-            # yfinance 支援多個 tickers 一起抓，但為了處理方便與錯誤隔離，這裡逐一抓取或分批
-            # 這裡使用 Tickers 物件一次抓取
-            symbols_str = " ".join(tickers.values())
-            result = yf.Tickers(symbols_str)
+            # 使用 yfinance 批量抓取最新資料 (只抓最近一天的歷史數據來獲取收盤與前收)
+            # 這樣可以確保拿到漲跌幅
+            data = yf.download(symbols, period="1d", interval="1m", progress=False)
+            # 獲取前一日收盤價 (用於計算漲跌)
+            # 註: 有些代碼可能不在同一時區，抓取較複雜，這裡簡化處理
             
-            for name, symbol in tickers.items():
+            for name, symbol in tickers_map.items():
                 try:
-                    ticker = result.tickers[symbol]
-                    # fast_info 有時比較快且即時
-                    price = ticker.fast_info.last_price
-                    prev_close = ticker.fast_info.previous_close
+                    ticker = yf.Ticker(symbol)
+                    # 優先使用 fast_info 獲取即時價格
+                    info = ticker.fast_info
+                    price = info.last_price
+                    prev_close = info.previous_close
                     
                     if price and prev_close:
                         change_pct = ((price - prev_close) / prev_close) * 100
@@ -285,7 +295,21 @@ class PriceFetcher:
                             "emoji": emoji
                         })
                     else:
-                        data_list.append({"name": name, "price": 0, "change_pct": 0, "emoji": "⚠️"})
+                        # 如果 fast_info 拿不到，嘗試下載最近一筆
+                        hist = ticker.history(period="2d")
+                        if len(hist) >= 2:
+                            current_close = hist['Close'].iloc[-1]
+                            last_close = hist['Close'].iloc[-2]
+                            change_pct = ((current_close - last_close) / last_close) * 100
+                            emoji = "🔴" if change_pct > 0 else "🟢" if change_pct < 0 else "⚪"
+                            data_list.append({
+                                "name": name,
+                                "price": current_close,
+                                "change_pct": change_pct,
+                                "emoji": emoji
+                            })
+                        else:
+                            data_list.append({"name": name, "price": 0, "change_pct": 0, "emoji": "⚠️"})
                         
                 except Exception as ex:
                     print(f"抓取 {name} ({symbol}) 失敗: {ex}")
