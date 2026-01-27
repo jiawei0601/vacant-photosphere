@@ -25,6 +25,7 @@ class Notifier:
             self.app.add_handler(CommandHandler("mode", self._set_mode_command))
             self.app.add_handler(CommandHandler("prev", self._prev_command))
             self.app.add_handler(CommandHandler("market", self._market_command)) # New command
+            self.app.add_handler(CommandHandler("check", self._check_command)) # New command
             self.app.add_handler(CommandHandler("help", self._help_command))
             from telegram.ext import MessageHandler, filters
             self.app.add_handler(MessageHandler(filters.ALL, self._debug_handler))
@@ -32,6 +33,7 @@ class Notifier:
             self.alert_callback = None
             self.config_callback = None
             self.market_callback = None # New callback
+            self.check_callback = None # New callback
             self.stock_history_callback = None # New callback
 
     async def _debug_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -46,6 +48,7 @@ class Notifier:
                 "• /show list - 顯示目前監控清單 (同上)\n"
                 "• /market - 顯示主要市場指數 (台股、美股、貴金屬)\n"
                 "• /prev - 顯示前一交易日的完整收盤報告\n"
+                "• /check - 立即執行一次價格檢查與警報觸發\n"
                 "• /list [代碼] - 顯示代碼近五日詳細數據\n"
                 "• /alist - 顯示目前已暫停警報的清單\n\n"
                 "⚙️ 設定功能\n"
@@ -93,6 +96,10 @@ class Notifier:
     def set_market_callback(self, callback):
         """設定用於獲取市場指數的回呼函式"""
         self.market_callback = callback
+
+    def set_check_callback(self, callback):
+        """設定用於立即檢查價格的回呼函式"""
+        self.check_callback = callback
 
     def set_stock_history_callback(self, callback):
         """設定用於獲取股票歷史數據的回呼函式"""
@@ -208,6 +215,19 @@ class Notifier:
         except Exception as e:
              await update.message.reply_text(f"❌ 執行 /market 時發生錯誤: {e}")
              print(f"Error in _market_command: {e}")
+
+    async def _check_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.check_callback:
+            await update.message.reply_text("系統尚未準備好，請稍後再試。")
+            return
+        
+        try:
+            await update.message.reply_text("🔄 正在執行手動價格檢查...")
+            await self.check_callback()
+            await update.message.reply_text("✅ 檢查完成！已更新 Notion 並處理必要的警報。")
+        except Exception as e:
+            await update.message.reply_text(f"❌ 執行檢查時發生錯誤: {e}")
+            print(f"Error in _check_command: {e}")
 
     async def _stop_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not context.args:

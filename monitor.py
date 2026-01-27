@@ -15,7 +15,7 @@ class MarketMonitor:
         self.fetcher = PriceFetcher()
         self.notion = NotionHelper()
         self.notifier = Notifier()
-        self.interval = int(os.getenv("CHECK_INTERVAL_SECONDS", 300))
+        self.interval = int(os.getenv("CHECK_INTERVAL_SECONDS", 1800))
         self.allow_outside = os.getenv("ALLOW_OUTSIDE_MARKET_HOURS", "false").lower() == "true"
         self.last_open_date = None
         self.last_close_date = None
@@ -234,6 +234,7 @@ class MarketMonitor:
         self.notifier.set_alert_callback(self.change_alert_callback)
         self.notifier.set_config_callback(self.change_config_callback)
         self.notifier.set_market_callback(self.get_market_callback)
+        self.notifier.set_check_callback(self.check_once)
         self.notifier.set_stock_history_callback(self.get_stock_history_callback)
         
         # 獲取 Telegram Application
