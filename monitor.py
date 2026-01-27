@@ -295,45 +295,38 @@ class MarketMonitor:
                                 await self.notifier.send_message(message)
                                 self.last_noon_date = today
 
-                    # 13:30 收盤總結
-                    if dt_time(13, 30) <= curr_time < dt_time(13, 45):
-                        if self.last_close_date != today:
-                            summary = await self.get_detailed_summary(offset=0)
-                            message = f"📉 **台股今日收盤總結**\n\n{summary}\n\n本日監控任務結束，明日再會！"
-                            await self.notifier.send_message(message)
-                            self.last_close_date = today
-
-                    # 13:45 買賣力道量
-                    if dt_time(13, 45) <= curr_time < dt_time(14, 0):
-                        if self.last_order_stats_date != today:
+                    # 14:00 盤後綜合大報告 (包含收盤總結、買賣力道、詳細標的數據)
+                    if dt_time(14, 0) <= curr_time < dt_time(14, 20):
+                        if self.last_daily_report_date != today:
+                            # 1. 獲取市場買賣力道
+                            sentiment_msg = ""
                             stats = self.fetcher.get_market_order_stats()
                             if stats:
                                 diff_vol = stats['total_buy_volume'] - stats['total_sell_volume']
                                 sentiment = "🐂 偏多" if diff_vol > 0 else "🐻 偏空"
                                 overheat_index = (stats['total_deal_volume'] / stats['total_buy_volume']) * 100 if stats['total_buy_volume'] > 0 else 0
-                                message = (
-                                    f"📊 **台股全市場委託成交統計 (13:45)**\n\n"
-                                    f"• 數據日期: `{stats['date']}`\n"
-                                    f"• 總委買筆數: `{stats['total_buy_order']:,}`\n"
-                                    f"• 總委賣筆數: `{stats['total_sell_order']:,}`\n"
-                                    f"• 總委買成交量: `{stats['total_buy_volume']:,}`\n"
-                                    f"• 總委賣成交量: `{stats['total_sell_volume']:,}`\n"
-                                    f"• 總成交量: `{stats['total_deal_volume']:,}`\n"
-                                    f"• 買賣量差: `{diff_vol:+,}`\n"
+                                sentiment_msg = (
+                                    f"📊 **市場買賣力道統計**\n"
+                                    f"• 買賣量差: `{diff_vol:+,}` | **氣氛: {sentiment}**\n"
                                     f"• **過熱指數**: `{overheat_index:.2f}%` (成交/委買)\n"
-                                    f"• 市場氣氛: **{sentiment}**\n\n"
-                                    f"(統計時間: {stats['time']})"
+                                    f"• 數據日期: `{stats['date']}` ({stats['time']})\n\n"
                                 )
-                                await self.notifier.send_message(message)
-                                self.last_order_stats_date = today
-
-                    # 14:00 詳細報告
-                    if dt_time(14, 0) <= curr_time < dt_time(14, 15):
-                        if self.last_daily_report_date != today:
+                            
+                            # 2. 獲取監控標的詳細摘要
                             summary = await self.get_detailed_summary()
-                            message = f"🔔 **每日追蹤標的盤後報告 (14:00)**\n\n{summary}"
+                            
+                            message = (
+                                f"🏁 **台股每日盤後綜合報告 (14:00)**\n\n"
+                                f"{sentiment_msg}"
+                                f"📋 **監控標的收盤摘要**\n"
+                                f"{summary}"
+                            )
+                            
                             await self.notifier.send_message(message)
                             self.last_daily_report_date = today
+                            # 同步更新其他旗標以避免重複觸發(如果未來又拆開的話)
+                            self.last_close_date = today
+                            self.last_order_stats_date = today
 
                 # 2. 處理常規價格檢查
                 if self.is_market_open():
