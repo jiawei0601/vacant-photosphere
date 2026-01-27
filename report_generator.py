@@ -60,8 +60,8 @@ class ReportGenerator:
         """
         # Canvas size - dynamic height
         row_height = 100
-        header_height = 550
-        canvas_height = max(1100, header_height + (len(stock_list) * row_height) + 120)
+        header_height = 680
+        canvas_height = max(1200, header_height + (len(stock_list) * row_height) + 120)
         
         width = 1200
         img = Image.new('RGB', (width, canvas_height), color=self.bg_color)
@@ -78,11 +78,13 @@ class ReportGenerator:
 
         # Header
         draw.text((40, 40), f"台股每日盤後綜合報告", font=title_font, fill=self.accent_color)
-        draw.text((40, 100), f"日期: {sentiment_data.get('date', '---')} | 生成時間: {datetime.now().strftime('%H:%M')}", font=small_font, fill="#AAAAAA")
+        # Date info moved down to avoid overlap (Title is size 72)
+        draw.text((40, 130), f"日期: {sentiment_data.get('date', '---')} | 生成時間: {datetime.now().strftime('%H:%M')}", font=small_font, fill="#AAAAAA")
         
         # --- Market Sentiment Card ---
-        draw.rounded_rectangle([40, 150, 960, 400], radius=15, fill=self.card_color)
-        draw.text((70, 180), "市場氣氛與買賣力道", font=subtitle_font, fill=self.text_color)
+        # Shifted down following the date info
+        draw.rounded_rectangle([40, 190, width-60, 460], radius=15, fill=self.card_color)
+        draw.text((70, 215), "市場氣氛與買賣力道", font=subtitle_font, fill=self.text_color)
         
         if not sentiment_data:
             sentiment_data = {"date": "---", "sentiment": "---", "diff_vol": 0, "overheat_index": 0}
@@ -94,12 +96,12 @@ class ReportGenerator:
         
         sent_color = self.up_color if "多" in sent else self.down_color if "空" in sent else self.text_color
         
-        draw.text((70, 240), f"市場氣分: {sent}", font=body_font, fill=sent_color)
-        draw.text((70, 280), f"買賣量差: {diff_vol:+,}", font=body_font, fill=self.text_color)
-        draw.text((70, 320), f"過熱指數: {overheat:.2f}%", font=body_font, fill=self.accent_color)
+        draw.text((70, 280), f"市場氣分: {sent}", font=body_font, fill=sent_color)
+        draw.text((70, 335), f"買賣量差: {diff_vol:+,}", font=body_font, fill=self.text_color)
+        draw.text((70, 390), f"過熱指數: {overheat:.2f}%", font=body_font, fill=self.accent_color)
         
         # --- Stock List Title ---
-        list_start_y = 430
+        list_start_y = 500
         draw.text((40, list_start_y), "監控標的盤後統計", font=subtitle_font, fill=self.text_color)
         
         # Table Header
@@ -155,7 +157,7 @@ class ReportGenerator:
         # Sort by date ascending for chart
         stats_list = sorted(stats_list, key=lambda x: x['date'])
         
-        width, height = 1000, 800
+        width, height = 1100, 1000
         img = Image.new('RGB', (width, height), color=self.bg_color)
         draw = ImageDraw.Draw(img)
         
@@ -170,9 +172,9 @@ class ReportGenerator:
         # Header
         draw.text((40, 30), f"📈 {symbol} 五日 K 線數據變化", font=title_font, fill=self.accent_color)
         
-        # Chart Area
-        chart_x, chart_y = 100, 120
-        chart_w, chart_h = 800, 400
+        # Chart Area - Moved down to avoid title overlap
+        chart_x, chart_y = 120, 160
+        chart_w, chart_h = 850, 420
         
         # Calculate Y scale (Price)
         all_prices = []
@@ -226,18 +228,18 @@ class ReportGenerator:
         if len(ma20_points) > 1:
             draw.line(ma20_points, fill=self.ma20_color, width=2)
             
-        # Legend for MA lines
-        draw.line([chart_x + chart_w - 200, 50, chart_x + chart_w - 150, 50], fill=self.ma5_color, width=3)
-        draw.text((chart_x + chart_w - 145, 40), "MA5", font=small_font, fill=self.text_color)
-        draw.line([chart_x + chart_w - 100, 50, chart_x + chart_w - 50, 50], fill=self.ma20_color, width=3)
-        draw.text((chart_x + chart_w - 45, 40), "MA20", font=small_font, fill=self.text_color)
+        # Legend for MA lines - Moved below title
+        draw.line([width - 280, 110, width - 230, 110], fill=self.ma5_color, width=4)
+        draw.text((width - 220, 95), "MA5", font=small_font, fill=self.text_color)
+        draw.line([width - 150, 110, width - 100, 110], fill=self.ma20_color, width=4)
+        draw.text((width - 90, 95), "MA20", font=small_font, fill=self.text_color)
             
         # --- Volume Bar Chart ---
-        vol_y = 580
-        vol_h = 120
+        vol_y = 650
+        vol_h = 130
         max_vol = max([s['volume'] for s in stats_list])
         
-        draw.text((40, vol_y - 40), f"成交量 (Max: {max_vol:,})", font=subtitle_font, fill="#FFFFFF")
+        draw.text((40, vol_y - 45), f"成交量 (Max: {max_vol:,})", font=subtitle_font, fill="#FFFFFF")
         
         for i, s in enumerate(stats_list):
             cx = chart_x + spacing * (i + 1)
@@ -246,26 +248,26 @@ class ReportGenerator:
             draw.rectangle([cx - bar_w/2, vol_y + vol_h - vh, cx + bar_w/2, vol_y + vol_h], fill=color, outline="#222222")
             
         # Footer Data Table
-        curr_y = vol_y + vol_h + 40
-        draw.line([40, curr_y, 960, curr_y], fill="#444444", width=2)
-        curr_y += 10
+        curr_y = vol_y + vol_h + 50
+        draw.line([40, curr_y, width - 40, curr_y], fill="#444444", width=2)
+        curr_y += 15
         draw.text((60, curr_y), "日期", font=small_font, fill="#888888")
-        draw.text((200, curr_y), "開盤", font=small_font, fill="#888888")
-        draw.text((350, curr_y), "最高", font=small_font, fill="#888888")
-        draw.text((500, curr_y), "最低", font=small_font, fill="#888888")
-        draw.text((650, curr_y), "收盤", font=small_font, fill="#888888")
-        draw.text((800, curr_y), "MA20", font=small_font, fill="#888888")
+        draw.text((220, curr_y), "開盤", font=small_font, fill="#888888")
+        draw.text((380, curr_y), "最高", font=small_font, fill="#888888")
+        draw.text((540, curr_y), "最低", font=small_font, fill="#888888")
+        draw.text((700, curr_y), "收盤", font=small_font, fill="#888888")
+        draw.text((860, curr_y), "MA20", font=small_font, fill="#888888")
         
         for i, s in enumerate(reversed(stats_list)):
-            curr_y += 30
+            curr_y += 35
             if i >= 5: break
             color = self.up_color if s['close'] >= s['open'] else self.down_color
             draw.text((60, curr_y), s['date'], font=small_font, fill="#FFFFFF")
-            draw.text((200, curr_y), f"{s['open']}", font=small_font, fill="#FFFFFF")
-            draw.text((350, curr_y), f"{s['high']}", font=small_font, fill="#FFFFFF")
-            draw.text((500, curr_y), f"{s['low']}", font=small_font, fill="#FFFFFF")
-            draw.text((650, curr_y), f"{s['close']}", font=small_font, fill=color)
-            draw.text((800, curr_y), f"{s.get('ma20', '---')}", font=small_font, fill="#FFFFFF")
+            draw.text((220, curr_y), f"{s['open']}", font=small_font, fill="#FFFFFF")
+            draw.text((380, curr_y), f"{s['high']}", font=small_font, fill="#FFFFFF")
+            draw.text((540, curr_y), f"{s['low']}", font=small_font, fill="#FFFFFF")
+            draw.text((700, curr_y), f"{s['close']}", font=small_font, fill=color)
+            draw.text((860, curr_y), f"{s.get('ma20', '---')}", font=small_font, fill="#FFFFFF")
 
         img.save(output_path)
         return output_path
