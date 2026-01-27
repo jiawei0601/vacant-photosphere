@@ -47,6 +47,12 @@ class PriceFetcher:
                 print(f"[{symbol}] taiwan_stock_daily 未回傳資料。")
                 return None
             return None
+        except KeyError as e:
+            if str(e) == "'data'":
+                print(f"[{symbol}] 獲取失敗: API 回傳格式錯誤 (KeyError: 'data')。這通常是因為未設定 FINMIND_TOKEN 或已達 API 使用上限。")
+            else:
+                print(f"獲取價格時發生 KeyError: {e}")
+            return None
         except Exception as e:
             print(f"獲取價格時發生錯誤: {e}")
             import traceback
@@ -99,6 +105,12 @@ class PriceFetcher:
                     })
                 
                 return stats_list
+            return None
+        except KeyError as e:
+            if str(e) == "'data'":
+                print(f"[{symbol}] 獲取失敗: API 回傳格式錯誤 (KeyError: 'data')。這通常是因為未設定 FINMIND_TOKEN 或已達 API 使用上限。")
+            else:
+                print(f"獲取 5 日統計資料時發生 KeyError: {e}")
             return None
         except Exception as e:
             print(f"獲取 5 日統計資料時發生錯誤: {e}")
@@ -170,6 +182,12 @@ class PriceFetcher:
                 }
             else:
                 print(f"[{symbol}] API 未回傳有效資料或資料為空")
+            return None
+        except KeyError as e:
+            if str(e) == "'data'":
+                print(f"[{symbol}] 獲取失敗: API 回傳格式錯誤 (KeyError: 'data')。這通常是因為未設定 FINMIND_TOKEN 或已達 API 使用上限。")
+            else:
+                print(f"獲取詳細統計資料時發生 KeyError: {e}")
             return None
         except Exception as e:
             print(f"獲取詳細統計資料時發生錯誤: {e}")
