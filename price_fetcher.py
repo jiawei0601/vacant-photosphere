@@ -362,13 +362,23 @@ class PriceFetcher:
         try:
             from datetime import datetime, timedelta
             now = datetime.now()
-            # 抓取最近 7 天的資料以確保至少能拿到前一個交易日
-            start_date = (now - timedelta(days=7)).strftime("%Y-%m-%d")
             
-            df = self.loader.get_data(
-                dataset="TaiwanStockStatisticsOfOrderBookAndTrade",
-                start_date=start_date
-            )
+            # 依序嘗試最近 5 天，直到抓到資料為止 (解決此資料集範圍抓取不穩的問題)
+            df = None
+            date_to_try = now
+            for _ in range(5):
+                try:
+                    target_date = date_to_try.strftime("%Y-%m-%d")
+                    df = self.loader.get_data(
+                        dataset="TaiwanStockStatisticsOfOrderBookAndTrade",
+                        start_date=target_date,
+                        end_date=target_date
+                    )
+                    if df is not None and not df.empty:
+                        break
+                except:
+                    pass
+                date_to_try -= timedelta(days=1)
             
             if df is not None and not df.empty:
                 # 統一欄位名稱為小寫
@@ -378,11 +388,11 @@ class PriceFetcher:
                 return {
                     "time": last_row.get("time", "---"),
                     "date": last_row.get("date", "---"),
-                    "total_buy_order": int(last_row.get("total_buy_order", 0)),
-                    "total_sell_order": int(last_row.get("total_sell_order", 0)),
-                    "total_buy_volume": int(last_row.get("total_buy_volume", 0)),
-                    "total_sell_volume": int(last_row.get("total_sell_volume", 0)),
-                    "total_deal_volume": int(last_row.get("total_deal_volume", 0)),
+                    "total_buy_order": int(last_row.get("totalbuyorder", 0)),
+                    "total_sell_order": int(last_row.get("totalsellorder", 0)),
+                    "total_buy_volume": int(last_row.get("totalbuyvolume", 0)),
+                    "total_sell_volume": int(last_row.get("totalsellvolume", 0)),
+                    "total_deal_volume": int(last_row.get("totaldealvolume", 0)),
                 }
             return None
         except Exception as e:
