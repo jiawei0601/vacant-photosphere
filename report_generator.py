@@ -57,20 +57,20 @@ class ReportGenerator:
         stock_list: list of {name, symbol, close, change_pct, ma20_status}
         """
         # Canvas size - dynamic height
-        row_height = 90
-        header_height = 500
-        canvas_height = max(1000, header_height + (len(stock_list) * row_height) + 100)
+        row_height = 100
+        header_height = 550
+        canvas_height = max(1100, header_height + (len(stock_list) * row_height) + 120)
         
-        width = 1100
+        width = 1200
         img = Image.new('RGB', (width, canvas_height), color=self.bg_color)
         draw = ImageDraw.Draw(img)
         
-        # Load fonts - Increased sizes
+        # Load fonts - Further Increased sizes
         try:
-            title_font = ImageFont.truetype(self.font_path, 60) if self.font_path else ImageFont.load_default()
-            subtitle_font = ImageFont.truetype(self.font_path, 36) if self.font_path else ImageFont.load_default()
-            body_font = ImageFont.truetype(self.font_path, 32) if self.font_path else ImageFont.load_default()
-            small_font = ImageFont.truetype(self.font_path, 24) if self.font_path else ImageFont.load_default()
+            title_font = ImageFont.truetype(self.font_path, 72) if self.font_path else ImageFont.load_default()
+            subtitle_font = ImageFont.truetype(self.font_path, 42) if self.font_path else ImageFont.load_default()
+            body_font = ImageFont.truetype(self.font_path, 36) if self.font_path else ImageFont.load_default()
+            small_font = ImageFont.truetype(self.font_path, 28) if self.font_path else ImageFont.load_default()
         except:
             title_font = subtitle_font = body_font = small_font = ImageFont.load_default()
 
@@ -101,42 +101,42 @@ class ReportGenerator:
         draw.text((40, list_start_y), "監控標的盤後統計", font=subtitle_font, fill=self.text_color)
         
         # Table Header
-        header_y = list_start_y + 60
+        header_y = list_start_y + 80
         draw.text((60, header_y), "股票名稱", font=body_font, fill="#AAAAAA")
-        draw.text((350, header_y), "收盤", font=body_font, fill="#AAAAAA")
-        draw.text((500, header_y), "漲跌", font=body_font, fill="#AAAAAA")
-        draw.text((700, header_y), "MA20 狀態", font=body_font, fill="#AAAAAA")
-        draw.text((920, header_y), "成交量", font=body_font, fill="#AAAAAA")
+        draw.text((380, header_y), "收盤", font=body_font, fill="#AAAAAA")
+        draw.text((550, header_y), "漲跌", font=body_font, fill="#AAAAAA")
+        draw.text((750, header_y), "MA20 狀態", font=body_font, fill="#AAAAAA")
+        draw.text((1000, header_y), "成交量", font=body_font, fill="#AAAAAA")
         
-        draw.line([60, header_y+50, width-60, header_y+50], fill="#333333", width=2)
+        draw.line([60, header_y+60, width-60, header_y+60], fill="#333333", width=2)
         
         # Render Rows
-        curr_y = header_y + 80
+        curr_y = header_y + 100
         for stock in stock_list:
             color = self.up_color if stock['change_pct'] > 0 else self.down_color if stock['change_pct'] < 0 else self.text_color
             
             # Name & Symbol
             draw.text((60, curr_y), f"{stock['name']}", font=body_font, fill=self.text_color)
-            draw.text((60, curr_y+35), f"{stock['symbol']}", font=small_font, fill="#888888")
+            draw.text((60, curr_y+40), f"{stock['symbol']}", font=small_font, fill="#888888")
             
             # Price
-            draw.text((350, curr_y), f"{stock['close']}", font=body_font, fill=self.text_color)
+            draw.text((380, curr_y), f"{stock['close']}", font=body_font, fill=self.text_color)
             
             # Change %
             change_str = f"{stock['change_pct']:+.2f}%" if stock['change_pct'] is not None else "---"
-            draw.text((500, curr_y), change_str, font=body_font, fill=color)
+            draw.text((550, curr_y), change_str, font=body_font, fill=color)
             
             # MA Status
             ma_status = stock.get('ma20_status', '---')
             ma_color = self.up_color if "站上" in ma_status else self.down_color if "跌破" in ma_status else "#AAAAAA"
-            draw.text((700, curr_y), ma_status, font=body_font, fill=ma_color)
+            draw.text((750, curr_y), ma_status, font=body_font, fill=ma_color)
             
             # Volume
             volume_str = f"{stock.get('volume', 0):,}"
-            draw.text((920, curr_y), volume_str, font=body_font, fill="#AAAAAA")
+            draw.text((1000, curr_y), volume_str, font=body_font, fill="#AAAAAA")
             
             curr_y += row_height
-            draw.line([60, curr_y-15, width-60, curr_y-15], fill="#222222", width=1)
+            draw.line([60, curr_y-20, width-60, curr_y-20], fill="#222222", width=1)
             
         # Footer
         draw.text((width//2 - 150, canvas_height - 60), "Antigravity Stock Monitor v2.1", font=small_font, fill="#555555")
