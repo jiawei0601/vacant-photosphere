@@ -19,6 +19,7 @@ class MarketMonitor:
         self.allow_outside = os.getenv("ALLOW_OUTSIDE_MARKET_HOURS", "false").lower() == "true"
         self.last_open_date = None
         self.last_close_date = None
+        self.last_noon_date = None
 
     def is_market_open(self):
         """
@@ -236,6 +237,22 @@ class MarketMonitor:
                             message = f"📉 **台股今日收盤總結**\n\n{summary}\n\n本日監控任務結束，明日再會！"
                             await self.notifier.send_message(message)
                             self.last_close_date = today
+                    
+                    # 12:00 中午加權指數與 MA20 報告
+                    if curr_time >= dt_time(12, 0) and curr_time < dt_time(12, 20):
+                        if self.last_noon_date != today:
+                            price, ma20 = self.fetcher.get_ticker_ma("^TWII", window=20)
+                            if price and ma20:
+                                status = "📈 站上 MA20" if price >= ma20 else "📉 跌破 MA20"
+                                message = (
+                                    f"🕛 **午間台股加權指數報告**\n\n"
+                                    f"• 目前指數: `{price:,.2f}`\n"
+                                    f"• 指數 MA20 : `{ma20:,.2f}`\n"
+                                    f"• 當前狀態: **{status}**\n\n"
+                                    f"系統持續監控中..."
+                                )
+                                await self.notifier.send_message(message)
+                                self.last_noon_date = today
 
                 if self.is_market_open():
                     await self.check_once()

@@ -239,6 +239,28 @@ class PriceFetcher:
             print(f"獲取 API 使用量時發生錯誤: {e}")
             return None
 
+    def get_ticker_ma(self, symbol, window=20):
+        """
+        使用 yfinance 獲取特定代碼的移動平均線 (例如 MA20)
+        """
+        try:
+            ticker = yf.Ticker(symbol)
+            # 抓取足以計算 MA 的歷史長度 (安全起見抓 60 天)
+            hist = ticker.history(period="60d")
+            if len(hist) < window:
+                return None, None
+            
+            # 計算 MA
+            hist['MA'] = hist['Close'].rolling(window=window).mean()
+            
+            last_price = hist['Close'].iloc[-1]
+            last_ma = hist['MA'].iloc[-1]
+            
+            return round(float(last_price), 2), round(float(last_ma), 2)
+        except Exception as e:
+            print(f"獲取 {symbol} MA 時發生錯誤: {e}")
+            return None, None
+
     def get_market_indices(self):
         """
         獲取主要市場指數 (台股、美股、能源、匯率、加密貨幣)
