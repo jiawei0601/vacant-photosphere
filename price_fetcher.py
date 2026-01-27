@@ -41,6 +41,18 @@ class PriceFetcher:
                 }
 
         try:
+            # 1. 優先嘗試富果 (由使用者要求)
+            if self.fugle_token:
+                fugle_data = self._get_fugle_snapshot(symbol)
+                if fugle_data:
+                    # 更新快取
+                    self.price_cache[symbol] = {
+                        "price": fugle_data['price'],
+                        "time": now
+                    }
+                    return fugle_data
+
+            # 2. 如果富果未設定或失敗，嘗試 FinMind
             # 取得最近幾天的資料以確保能拿到最後一筆成交價
             end_date = now.strftime("%Y-%m-%d")
             start_date = (now - timedelta(days=5)).strftime("%Y-%m-%d")
@@ -69,20 +81,10 @@ class PriceFetcher:
                             "source": "FinMind"
                         }
                 
-                # 如果 FinMind 沒資料，嘗試富果
-                fugle_data = self._get_fugle_snapshot(symbol)
-                if fugle_data:
-                    # 更新快取
-                    self.price_cache[symbol] = {
-                        "price": fugle_data['price'],
-                        "time": now
-                    }
-                    return fugle_data
-                
                 print(f"[{symbol}] 找不到有效的 'close' 欄位資料。")
                 return None
             else:
-                print(f"[{symbol}] taiwan_stock_daily 未回傳資料。")
+                print(f"[{symbol}] FinMind/Fugle 均未回傳資料。")
                 return None
         except KeyError as e:
             if str(e) == "'data'":
@@ -162,17 +164,21 @@ class PriceFetcher:
             end_date_str = datetime.now().strftime("%Y-%m-%d")
             start_date_str = (datetime.now() - timedelta(days=40)).strftime("%Y-%m-%d")
             
-            # 1. 嘗試 FinMind
-            df = self.loader.taiwan_stock_daily(
-                stock_id=symbol,
-                start_date=start_date_str,
-                end_date=end_date_str
-            )
-            
-            # 2. 如果 FinMind 失敗，嘗試 Fugle
-            if (df is None or df.empty) and self.fugle_token:
-                print(f"[{symbol}] FinMind 歷史資料擷取失敗，啟動富果備援方案...")
+            # 1. 優先嘗試富果
+            df = None
+            if self.fugle_token:
                 df = self._get_fugle_historical(symbol, start_date_str, end_date_str)
+                if df is not None and not df.empty:
+                     source_tag = "Fugle"
+            
+            # 2. 如果富果失敗或未設定，嘗試 FinMind
+            if df is None or df.empty:
+                df = self.loader.taiwan_stock_daily(
+                    stock_id=symbol,
+                    start_date=start_date_str,
+                    end_date=end_date_str
+                )
+                source_tag = "FinMind"
 
             if df is not None and not df.empty:
                 # 統一欄位名稱為小寫
@@ -227,17 +233,18 @@ class PriceFetcher:
             end_date_str = datetime.now().strftime("%Y-%m-%d")
             start_date_str = (datetime.now() - timedelta(days=65)).strftime("%Y-%m-%d")
             
-            # 1. 嘗試 FinMind
-            df = self.loader.taiwan_stock_daily(
-                stock_id=symbol,
-                start_date=start_date_str,
-                end_date=end_date_str
-            )
-
-            # 2. 如果 FinMind 失敗，嘗試 Fugle
-            if (df is None or df.empty) and self.fugle_token:
-                print(f"[{symbol}] FinMind 詳細統計擷取失敗，啟動富果備援方案...")
+            # 1. 優先嘗試富果
+            df = None
+            if self.fugle_token:
                 df = self._get_fugle_historical(symbol, start_date_str, end_date_str)
+            
+            # 2. 如果富果失敗或未設定，嘗試 FinMind
+            if df is None or df.empty:
+                df = self.loader.taiwan_stock_daily(
+                    stock_id=symbol,
+                    start_date=start_date_str,
+                    end_date=end_date_str
+                )
             
             if df is not None and not df.empty:
                 # 統一欄位名稱為小寫
