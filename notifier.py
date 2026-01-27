@@ -223,8 +223,18 @@ class Notifier:
         
         try:
             await update.message.reply_text("🔄 正在執行手動價格檢查...")
-            await self.check_callback()
-            await update.message.reply_text("✅ 檢查完成！已更新 Notion 並處理必要的警報。")
+            success, fail = await self.check_callback()
+            
+            if success == 0 and fail == 0:
+                msg = "📝 監控清單為空，未執行檢查。"
+            elif fail == 0:
+                msg = f"✅ 檢查完成！成功更新 {success} 檔標的。"
+            elif success == 0:
+                msg = f"❌ 檢查失敗。共 {fail} 檔標的獲取數據失敗，請檢查 API 限制或 Token 設定。"
+            else:
+                msg = f"⚠️ 檢查部分完成。成功: {success}, 失敗: {fail}。\n(部分標的可能已達 API 上限)"
+                
+            await update.message.reply_text(msg)
         except Exception as e:
             await update.message.reply_text(f"❌ 執行檢查時發生錯誤: {e}")
             print(f"Error in _check_command: {e}")

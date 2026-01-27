@@ -45,15 +45,20 @@ class MarketMonitor:
         items = self.notion.get_monitoring_list()
         if not items:
             print("目前沒有要監控的標的。")
-            return
+            return 0, 0
 
+        success_count = 0
+        fail_count = 0
+        
         for item in items:
             symbol = item['symbol']
             price = self.fetcher.get_last_price(symbol)
             
             if price is None:
+                fail_count += 1
                 continue
                 
+            success_count += 1
             print(f"處理 {item['name']} ({symbol}): 當前價格 {price}")
             
             status = "正常"
@@ -85,6 +90,9 @@ class MarketMonitor:
             
             # 更新 Notion
             self.notion.update_price_and_status(item['page_id'], price, status)
+            
+        print(f"檢查任務完成。成功: {success_count}, 失敗: {fail_count}")
+        return success_count, fail_count
 
     async def get_summary_callback(self, offset=0):
         """回傳目前所有監控標的的摘要文字"""
