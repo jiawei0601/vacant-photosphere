@@ -10,6 +10,7 @@ load_dotenv()
 class PriceFetcher:
     def __init__(self):
         self.api_token = os.getenv("FINMIND_TOKEN", "").strip()
+        self.fugle_token = os.getenv("FUGLE_API_TOKEN", "").strip()
         self.loader = DataLoader()
         if self.api_token:
             print("正在使用 Token 登入 FinMind...")
@@ -64,8 +65,19 @@ class PriceFetcher:
                         return {
                             "price": price,
                             "time": now.strftime("%H:%M:%S"),
-                            "is_cached": False
+                            "is_cached": False,
+                            "source": "FinMind"
                         }
+                
+                # 如果 FinMind 沒資料，嘗試富果
+                fugle_data = self._get_fugle_snapshot(symbol)
+                if fugle_data:
+                    # 更新快取
+                    self.price_cache[symbol] = {
+                        "price": fugle_data['price'],
+                        "time": now
+                    }
+                    return fugle_data
                 
                 print(f"[{symbol}] 找不到有效的 'close' 欄位資料。")
                 return None
@@ -82,6 +94,64 @@ class PriceFetcher:
             print(f"獲取價格時發生錯誤: {e}")
             return None
 
+    def _get_fugle_snapshot(self, symbol):
+        """
+        使用富果 Fugle API 作為備用方案獲取最新行情
+        """
+        if not self.fugle_token:
+            return None
+        
+        try:
+            url = f"https://api.fugle.tw/marketdata/v1.0/stock/snapshot/{symbol}"
+            headers = {"X-API-KEY": self.fugle_token}
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                # 富果 snapshot 有時在 'last_price' 有時在 'close'
+                price = data.get('last_price') or data.get('close')
+                if price:
+                    return {
+                        "price": float(price),
+                        "time": datetime.now().strftime("%H:%M:%S"),
+                        "is_cached": False,
+                        "source": "Fugle"
+                    }
+            return None
+        except Exception as e:
+            print(f"[{symbol}] Fugle Snapshot 備援失敗: {e}")
+            return None
+
+    def _get_fugle_historical(self, symbol, start_date, end_date):
+        """
+        使用富果 Fugle API 獲取歷史 K 線資料，並轉換為 DataFrame 格式
+        """
+        if not self.fugle_token:
+            return None
+        
+        try:
+            url = f"https://api.fugle.tw/marketdata/v1.0/stock/historical/candles/{symbol}"
+            params = {"from": start_date, "to": end_date, "fields": "open,high,low,close,volume"}
+            headers = {"X-API-KEY": self.fugle_token}
+            response = requests.get(url, params=params, headers=headers, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                candles = data.get('candles', [])
+                if not candles:
+                    return None
+                
+                df = pd.DataFrame(candles)
+                # 重新命名欄位以符合後續邏輯 (Fugle: date, open, high, low, close, volume)
+                df = df.rename(columns={'volume': 'trading_volume'})
+                df.columns = [c.lower() for c in df.columns]
+                # Fugle 的資料通常是從新到舊，需翻轉
+                df = df.iloc[::-1].reset_index(drop=True)
+                return df
+            return None
+        except Exception as e:
+            print(f"[{symbol}] Fugle Historical 備援發生錯誤: {e}")
+            return None
+
     def get_five_day_stats(self, symbol):
         """
         獲取股票最近五個交易日的詳細數據 (含 MA5, MA20)
@@ -89,15 +159,21 @@ class PriceFetcher:
         try:
             from datetime import datetime, timedelta
             # 獲取約 40 天的資料以確保計算出 MA20
-            end_date = datetime.now().strftime("%Y-%m-%d")
-            start_date = (datetime.now() - timedelta(days=40)).strftime("%Y-%m-%d")
+            end_date_str = datetime.now().strftime("%Y-%m-%d")
+            start_date_str = (datetime.now() - timedelta(days=40)).strftime("%Y-%m-%d")
             
+            # 1. 嘗試 FinMind
             df = self.loader.taiwan_stock_daily(
                 stock_id=symbol,
-                start_date=start_date,
-                end_date=end_date
+                start_date=start_date_str,
+                end_date=end_date_str
             )
             
+            # 2. 如果 FinMind 失敗，嘗試 Fugle
+            if (df is None or df.empty) and self.fugle_token:
+                print(f"[{symbol}] FinMind 歷史資料擷取失敗，啟動富果備援方案...")
+                df = self._get_fugle_historical(symbol, start_date_str, end_date_str)
+
             if df is not None and not df.empty:
                 # 統一欄位名稱為小寫
                 df.columns = [c.lower() for c in df.columns]
@@ -148,14 +224,20 @@ class PriceFetcher:
         try:
             from datetime import datetime, timedelta
             # 獲取約 60 天的資料以確保計算出 MA20
-            end_date = datetime.now().strftime("%Y-%m-%d")
-            start_date = (datetime.now() - timedelta(days=65)).strftime("%Y-%m-%d")
+            end_date_str = datetime.now().strftime("%Y-%m-%d")
+            start_date_str = (datetime.now() - timedelta(days=65)).strftime("%Y-%m-%d")
             
+            # 1. 嘗試 FinMind
             df = self.loader.taiwan_stock_daily(
                 stock_id=symbol,
-                start_date=start_date,
-                end_date=end_date
+                start_date=start_date_str,
+                end_date=end_date_str
             )
+
+            # 2. 如果 FinMind 失敗，嘗試 Fugle
+            if (df is None or df.empty) and self.fugle_token:
+                print(f"[{symbol}] FinMind 詳細統計擷取失敗，啟動富果備援方案...")
+                df = self._get_fugle_historical(symbol, start_date_str, end_date_str)
             
             if df is not None and not df.empty:
                 # 統一欄位名稱為小寫

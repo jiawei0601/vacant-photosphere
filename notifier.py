@@ -265,6 +265,11 @@ class Notifier:
                     f"• 每小時上限: `{limit}`\n"
                     f"• 已用百分比: `{percent}%`"
                 )
+                
+                # 增加富果備援顯示
+                fugle_status = "✅ 已設定" if os.getenv("FUGLE_API_TOKEN") else "❌ 未設定"
+                msg += f"\n\n🛠️ **備援系統**\n• 富果 Fugle API: {fugle_status}"
+                
                 await update.message.reply_text(msg, parse_mode='Markdown')
         except Exception as e:
             await update.message.reply_text(f"❌ 查詢時發生錯誤: {e}")
