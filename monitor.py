@@ -271,6 +271,19 @@ class MarketMonitor:
             print(f"回調產生圖片報告失敗: {e}")
             return None, f"圖片生成失敗: {e}"
 
+    async def get_stock_chart_callback(self, symbol):
+        """用於回傳特定股票 K 線圖路徑"""
+        stats_list = self.fetcher.get_five_day_stats(symbol)
+        if not stats_list:
+            return None
+            
+        try:
+            img_path = self.generator.generate_stock_history_chart(symbol, stats_list)
+            return img_path
+        except Exception as e:
+            print(f"回調產生 K 線圖失敗: {e}")
+            return None
+
     async def test_report_callback(self, report_type):
         """用於測試發送各種自動化報告"""
         today = self._get_now_taipei().date()
@@ -413,6 +426,7 @@ class MarketMonitor:
         self.notifier.set_stock_history_callback(self.get_stock_history_callback)
         self.notifier.set_test_callback(self.test_report_callback)
         self.notifier.set_report_callback(self.get_graphical_report_callback)
+        self.notifier.set_stock_chart_callback(self.get_stock_chart_callback)
         
         # 獲取 Telegram Application
         app = self.notifier.app

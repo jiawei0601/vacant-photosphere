@@ -19,6 +19,7 @@ class Notifier:
             self.app.add_handler(CommandHandler("start", self._start_command))
             self.app.add_handler(CommandHandler("alist", self._alist_command))
             self.app.add_handler(CommandHandler("list", self._list_command))
+            self.app.add_handler(CommandHandler("dlist", self._dlist_command))
             self.app.add_handler(CommandHandler("sethigh", self._set_high_command))
             self.app.add_handler(CommandHandler("setlow", self._set_low_command))
             self.app.add_handler(CommandHandler("interval", self._set_interval_command))
@@ -41,6 +42,7 @@ class Notifier:
             self.stock_history_callback = None # New callback
             self.test_callback = None # New callback
             self.report_callback = None # New callback
+            self.stock_chart_callback = None # New callback
 
     async def _debug_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
@@ -52,8 +54,8 @@ class Notifier:
                 "🚀 **庫存股價格監控系統 - 指令指南**\n\n"
                 "🔍 **即時查詢**\n"
                 "• `/check` - 立即執行一次價格檢查與警報觸發\n"
-                "• `/market` - 顯示全球指數 (台/美股、能源、匯率、加密貨幣)\n"
-                "• `/list [代碼]` - 查詢標的近 5 日詳細 K 線與 MA 數據\n"
+                "• `/list [代碼]` - 查詢標的近 5 日詳細 K 線數據 (文字)\n"
+                "• `/dlist [代碼]` - 查詢標的近 5 日 K 線變化 (圖片)\n"
                 "• `/apicheck` - 查詢 API 剩餘額度與備援狀態\n"
                 "• `/test [類別]` - 手動測試報告 (noon/sentiment/daily)\n\n"
                 "📋 **監控與報告**\n"
@@ -131,6 +133,10 @@ class Notifier:
     def set_report_callback(self, callback):
         """設定用於獲取圖形化報告回呼函式"""
         self.report_callback = callback
+    
+    def set_stock_chart_callback(self, callback):
+        """設定用於獲取股票 K 線圖回呼函式"""
+        self.stock_chart_callback = callback
 
     async def _set_interval_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not context.args:
@@ -338,6 +344,27 @@ class Notifier:
         except Exception as e:
             await update.message.reply_text(f"❌ 查詢時發生錯誤: {e}")
             print(f"Error in _list_command (history): {e}")
+
+    async def _dlist_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not context.args:
+            await update.message.reply_text("請提供要查詢的代碼，例如：/dlist 2330")
+            return
+            
+        symbol = context.args[0].upper()
+        if not self.stock_chart_callback:
+            await update.message.reply_text("系統尚未準備好，請稍後再試。")
+            return
+            
+        try:
+            await update.message.reply_text(f"📊 正在產生 {symbol} 的五日 K 線圖...")
+            img_path = await self.stock_chart_callback(symbol)
+            if not img_path:
+                await update.message.reply_text(f"找不到 {symbol} 的數據或圖片生成失敗。")
+            else:
+                await self.send_photo(img_path, caption=f"📈 **{symbol} 五日 K 線變化圖**")
+        except Exception as e:
+            await update.message.reply_text(f"❌ 查詢時發生錯誤: {e}")
+            print(f"Error in _dlist_command: {e}")
 
     async def _alist_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """顯示目前的暫停警報清單"""

@@ -144,6 +144,109 @@ class ReportGenerator:
         img.save(output_path)
         return output_path
 
+    def generate_stock_history_chart(self, symbol, stats_list, output_path="stock_history_chart.png"):
+        """
+        stats_list: list of {date, open, high, low, close, volume, ma5, ma20}
+        """
+        if not stats_list: return None
+        
+        # Sort by date ascending for chart
+        stats_list = sorted(stats_list, key=lambda x: x['date'])
+        
+        width, height = 1000, 800
+        img = Image.new('RGB', (width, height), color=self.bg_color)
+        draw = ImageDraw.Draw(img)
+        
+        try:
+            title_font = ImageFont.truetype(self.font_path, 48) if self.font_path else ImageFont.load_default()
+            subtitle_font = ImageFont.truetype(self.font_path, 32) if self.font_path else ImageFont.load_default()
+            body_font = ImageFont.truetype(self.font_path, 24) if self.font_path else ImageFont.load_default()
+            small_font = ImageFont.truetype(self.font_path, 18) if self.font_path else ImageFont.load_default()
+        except:
+            title_font = subtitle_font = body_font = small_font = ImageFont.load_default()
+
+        # Header
+        draw.text((40, 30), f"📈 {symbol} 五日 K 線數據變化", font=title_font, fill=self.accent_color)
+        
+        # Chart Area
+        chart_x, chart_y = 100, 120
+        chart_w, chart_h = 800, 400
+        
+        # Calculate Y scale (Price)
+        all_prices = []
+        for s in stats_list:
+            all_prices.extend([s['high'], s['low']])
+            if s.get('ma5'): all_prices.append(s['ma5'])
+            if s.get('ma20'): all_prices.append(s['ma20'])
+            
+        min_p, max_p = min(all_prices) * 0.98, max(all_prices) * 1.02
+        p_range = max_p - min_p
+        
+        def get_y(p): return chart_y + chart_h - ((p - min_p) / p_range * chart_h)
+
+        # Draw Grid Lines
+        for i in range(5):
+            val = min_p + (p_range * i / 4)
+            y = get_y(val)
+            draw.line([chart_x, y, chart_x + chart_w, y], fill="#333333", width=1)
+            draw.text((20, y - 10), f"{val:.1f}", font=small_font, fill="#888888")
+
+        # Draw Candlesticks
+        bar_w = 60
+        spacing = chart_w / (len(stats_list) + 1)
+        
+        for i, s in enumerate(stats_list):
+            cx = chart_x + spacing * (i + 1)
+            color = self.up_color if s['close'] >= s['open'] else self.down_color
+            
+            # Wick
+            draw.line([cx, get_y(s['high']), cx, get_y(s['low'])], fill=color, width=2)
+            # Body
+            top, bottom = get_y(max(s['open'], s['close'])), get_y(min(s['open'], s['close']))
+            if abs(top - bottom) < 2: bottom = top + 2 # Ensure visible body
+            draw.rectangle([cx - bar_w/2, top, cx + bar_w/2, bottom], fill=color)
+            
+            # Date
+            draw.text((cx - 30, chart_y + chart_h + 10), s['date'][-5:], font=small_font, fill="#AAAAAA")
+            
+        # --- Volume Bar Chart ---
+        vol_y = 580
+        vol_h = 120
+        max_vol = max([s['volume'] for s in stats_list])
+        
+        draw.text((40, vol_y - 40), f"成交量 (Max: {max_vol:,})", font=subtitle_font, fill="#FFFFFF")
+        
+        for i, s in enumerate(stats_list):
+            cx = chart_x + spacing * (i + 1)
+            vh = (s['volume'] / max_vol) * vol_h
+            color = self.up_color if s['close'] >= s['open'] else self.down_color
+            draw.rectangle([cx - bar_w/2, vol_y + vol_h - vh, cx + bar_w/2, vol_y + vol_h], fill=color, outline="#222222")
+            
+        # Footer Data Table
+        curr_y = vol_y + vol_h + 40
+        draw.line([40, curr_y, 960, curr_y], fill="#444444", width=2)
+        curr_y += 10
+        draw.text((60, curr_y), "日期", font=small_font, fill="#888888")
+        draw.text((200, curr_y), "開盤", font=small_font, fill="#888888")
+        draw.text((350, curr_y), "最高", font=small_font, fill="#888888")
+        draw.text((500, curr_y), "最低", font=small_font, fill="#888888")
+        draw.text((650, curr_y), "收盤", font=small_font, fill="#888888")
+        draw.text((800, curr_y), "MA20", font=small_font, fill="#888888")
+        
+        for i, s in enumerate(reversed(stats_list)):
+            curr_y += 30
+            if i >= 5: break
+            color = self.up_color if s['close'] >= s['open'] else self.down_color
+            draw.text((60, curr_y), s['date'], font=small_font, fill="#FFFFFF")
+            draw.text((200, curr_y), f"{s['open']}", font=small_font, fill="#FFFFFF")
+            draw.text((350, curr_y), f"{s['high']}", font=small_font, fill="#FFFFFF")
+            draw.text((500, curr_y), f"{s['low']}", font=small_font, fill="#FFFFFF")
+            draw.text((650, curr_y), f"{s['close']}", font=small_font, fill=color)
+            draw.text((800, curr_y), f"{s.get('ma20', '---')}", font=small_font, fill="#FFFFFF")
+
+        img.save(output_path)
+        return output_path
+
 if __name__ == "__main__":
     # Test
     gen = ReportGenerator()
