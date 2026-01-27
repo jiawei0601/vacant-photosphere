@@ -20,6 +20,7 @@ class MarketMonitor:
         self.last_open_date = None
         self.last_close_date = None
         self.last_noon_date = None
+        self.last_daily_report_date = None
 
     def is_market_open(self):
         """
@@ -165,7 +166,7 @@ class MarketMonitor:
             line = f"• **{item['name']}** ({symbol})\n"
             line += f"  收: `{stats['close']}` ({change_str})\n"
             line += f"  開: `{stats['open']}` / 高: `{stats['high']}` / 低: `{stats['low']}`\n"
-            line += f"  MA20: `{stats['ma20'] or '計算中'}`"
+            line += f"  量: `{stats['volume']:,}` / MA20: `{stats['ma20'] or '計算中'}`"
             lines.append(line)
             
         return date_info + "\n\n".join(lines)
@@ -253,6 +254,14 @@ class MarketMonitor:
                                 )
                                 await self.notifier.send_message(message)
                                 self.last_noon_date = today
+                    
+                    # 14:00 追蹤標的詳細報告
+                    if curr_time >= dt_time(14, 0) and curr_time < dt_time(14, 20):
+                        if self.last_daily_report_date != today:
+                            summary = await self.get_detailed_summary()
+                            message = f"🔔 **每日追蹤標的盤後報告 (14:00)**\n\n{summary}"
+                            await self.notifier.send_message(message)
+                            self.last_daily_report_date = today
 
                 if self.is_market_open():
                     await self.check_once()

@@ -201,6 +201,7 @@ class PriceFetcher:
                     "close": float(last_row.get('close', 0)),
                     "high": float(high_val),
                     "low": float(low_val),
+                    "volume": int(last_row.get('trading_volume', 0)),
                     "ma20": round(float(last_row.get('ma20', 0)), 2) if not pd.isna(last_row.get('ma20')) else None,
                     "change_pct": change_pct
                 }
