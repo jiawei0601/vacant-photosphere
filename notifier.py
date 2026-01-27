@@ -42,29 +42,30 @@ class Notifier:
         pass
 
     async def _help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """顯示功能的說明訊息"""
         try:
             help_text = (
-                "📌 可用指令清單\n\n"
-                "🔍 查詢功能\n"
-                "• /show all - 顯示目前 Notion 中所有標的摘要\n"
-                "• /show list - 顯示目前監控清單 (同上)\n"
-                "• /market - 顯示主要市場指數 (台股、美股、貴金屬)\n"
-                "• /prev - 顯示前一交易日的完整收盤報告\n"
-                "• /check - 立即執行一次價格檢查與警報觸發\n"
-                "• /apicheck - 查詢 FinMind API 剩餘額度\n"
-                "• /list [代碼] - 顯示代碼近五日詳細數據\n"
-                "• /alist - 顯示目前已暫停警報的清單\n\n"
-                "⚙️ 設定功能\n"
-                "• /sethigh [代碼] [價格] - 設定上限警戒值\n"
-                "• /setlow [代碼] [價格] - 設定下限警戒值\n"
-                "• /interval [秒數] - 設定檢查頻率 (至少 60 秒)\n"
-                "• /mode [on/off] - 是否開啟交易時段外監控\n\n"
-                "🔔 警報控制\n"
-                "• /stop [代碼] - 暫停特定標的的持續警報\n"
-                "• /start [代碼] - 恢復特定標的的監控\n\n"
-                "❔ /help - 顯示此說明訊息"
+                "🚀 **庫存股價格監控系統 - 指令指南**\n\n"
+                "🔍 **即時查詢**\n"
+                "• `/check` - 立即執行一次價格檢查與警報觸發\n"
+                "• `/market` - 顯示全球指數 (台/美股、能源、匯率、加密貨幣)\n"
+                "• `/list [代碼]` - 查詢標的近 5 日詳細 K 線與 MA 數據\n"
+                "• `/apicheck` - 查詢 API 剩餘額度與備援狀態\n\n"
+                "📋 **監控與報告**\n"
+                "• `/show` - 顯示目前所有監控中的標的報價清單\n"
+                "• `/prev` - 顯示前一交易日的完整盤後總結報告\n"
+                "• `/alist` - 顯示目前「已暫停警報」的標的清單\n\n"
+                "⚙️ **警報管理**\n"
+                "• `/stop [代碼]` - 暫停特定標的的價格警報 (例如: `/stop 2330`)\n"
+                "• `/start [代碼]` - 恢復特定標的的價格警報\n\n"
+                "💡 **自動化通知**\n"
+                "• 09:00 - 開盤提醒\n"
+                "• 12:00 - 大盤午間報告 (含 MA20 判定)\n"
+                "• 13:35 - 收盤總結報告\n"
+                "• 14:00 - 監控標的詳細盤後報告 (含量/MA20)\n\n"
+                "⚠️ *系統預設每 30 分鐘自動檢查一次報價*。"
             )
-            await update.message.reply_text(help_text)
+            await update.message.reply_text(help_text, parse_mode='Markdown')
         except Exception as e:
             print(f"發送 Help 訊息時發生錯誤: {e}")
 
