@@ -167,6 +167,26 @@ class MarketMonitor:
         """回傳市場指數資料"""
         return self.fetcher.get_market_indices()
 
+    async def get_stock_history_callback(self, symbol):
+        """回傳特定股票的五日歷史數據摘要"""
+        stats_list = self.fetcher.get_five_day_stats(symbol)
+        if not stats_list:
+            return None
+            
+        lines = [f"📈 **{symbol} 歷史成交數據 (近 5 日)**\n"]
+        
+        for s in stats_list:
+            line = (
+                f"📅 `{s['date']}`\n"
+                f"  開: `{s['open']}` | 收: `{s['close']}`\n"
+                f"  高: `{s['high']}` | 低: `{s['low']}`\n"
+                f"  量: `{s['volume']:,}`\n"
+                f"  MA5: `{s['ma5'] or '---'}` | MA20: `{s['ma20'] or '---'}`\n"
+            )
+            lines.append(line)
+            
+        return "\n".join(lines)
+
     async def run_monitor_loop(self):
         """背景執行的監控迴圈"""
         while True:
@@ -214,6 +234,7 @@ class MarketMonitor:
         self.notifier.set_alert_callback(self.change_alert_callback)
         self.notifier.set_config_callback(self.change_config_callback)
         self.notifier.set_market_callback(self.get_market_callback)
+        self.notifier.set_stock_history_callback(self.get_stock_history_callback)
         
         # 獲取 Telegram Application
         app = self.notifier.app

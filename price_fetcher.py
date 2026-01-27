@@ -53,6 +53,57 @@ class PriceFetcher:
             traceback.print_exc()
             return None
 
+    def get_five_day_stats(self, symbol):
+        """
+        獲取股票最近五個交易日的詳細數據 (含 MA5, MA20)
+        """
+        try:
+            from datetime import datetime, timedelta
+            # 獲取約 40 天的資料以確保計算出 MA20
+            end_date = datetime.now().strftime("%Y-%m-%d")
+            start_date = (datetime.now() - timedelta(days=40)).strftime("%Y-%m-%d")
+            
+            df = self.loader.taiwan_stock_daily(
+                stock_id=symbol,
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            if df is not None and not df.empty:
+                # 統一欄位名稱為小寫
+                df.columns = [c.lower() for c in df.columns]
+                
+                # 計算 MA5 與 MA20
+                df['ma5'] = df['close'].rolling(window=5).mean()
+                df['ma20'] = df['close'].rolling(window=20).mean()
+                
+                # 取得最後 5 筆
+                last_5_days = df.tail(5).copy()
+                
+                stats_list = []
+                cols = df.columns.tolist()
+                
+                for _, row in last_5_days.iterrows():
+                    high_val = row.get('max') if 'max' in cols else row.get('high', 0)
+                    low_val = row.get('min') if 'min' in cols else row.get('low', 0)
+                    
+                    stats_list.append({
+                        "date": row.get('date', '未知'),
+                        "open": float(row.get('open', 0)),
+                        "close": float(row.get('close', 0)),
+                        "high": float(high_val),
+                        "low": float(low_val),
+                        "volume": int(row.get('trading_volume', 0)),
+                        "ma5": round(float(row.get('ma5', 0)), 2) if not pd.isna(row.get('ma5')) else None,
+                        "ma20": round(float(row.get('ma20', 0)), 2) if not pd.isna(row.get('ma20')) else None
+                    })
+                
+                return stats_list
+            return None
+        except Exception as e:
+            print(f"獲取 5 日統計資料時發生錯誤: {e}")
+            return None
+
     def get_full_stats(self, symbol, offset=0):
         """
         獲取股票的完整統計資訊：開盤、收盤、最高、最低、MA20
