@@ -370,6 +370,8 @@ class PriceFetcher:
             )
             
             if df is not None and not df.empty:
+                # 統一欄位名稱為小寫
+                df.columns = [c.lower() for c in df.columns]
                 # 取得最後一筆 (13:30 收盤後的統計資訊)
                 last_row = df.iloc[-1]
                 return {
@@ -378,6 +380,7 @@ class PriceFetcher:
                     "total_sell_order": int(last_row.get("total_sell_order", 0)),
                     "total_buy_volume": int(last_row.get("total_buy_volume", 0)),
                     "total_sell_volume": int(last_row.get("total_sell_volume", 0)),
+                    "total_deal_volume": int(last_row.get("total_deal_volume", 0)),
                 }
             return None
         except Exception as e:

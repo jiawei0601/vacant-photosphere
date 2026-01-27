@@ -271,14 +271,21 @@ class MarketMonitor:
                             if stats:
                                 diff_vol = stats['total_buy_volume'] - stats['total_sell_volume']
                                 sentiment = "🐂 偏多" if diff_vol > 0 else "🐻 偏空"
+                                
+                                # 計算過熱指數: 累積成交數量 / 累積委託買進數量
+                                overheat_index = 0
+                                if stats['total_buy_volume'] > 0:
+                                    overheat_index = (stats['total_deal_volume'] / stats['total_buy_volume']) * 100
+                                
                                 message = (
                                     f"📊 **台股全市場委託成交統計 (13:45)**\n\n"
-                                    f"• 委買金額單位: 5秒統計\n"
                                     f"• 總委買筆數: `{stats['total_buy_order']:,}`\n"
                                     f"• 總委賣筆數: `{stats['total_sell_order']:,}`\n"
                                     f"• 總委買成交量: `{stats['total_buy_volume']:,}`\n"
                                     f"• 總委賣成交量: `{stats['total_sell_volume']:,}`\n"
+                                    f"• 總成交量: `{stats['total_deal_volume']:,}`\n"
                                     f"• 買賣量差: `{diff_vol:+,}`\n"
+                                    f"• **過熱指數**: `{overheat_index:.2f}%` (成交/委買)\n"
                                     f"• 市場氣氛: **{sentiment}**\n\n"
                                     f"(數據時間: {stats['time']})"
                                 )
