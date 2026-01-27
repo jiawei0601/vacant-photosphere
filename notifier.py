@@ -24,7 +24,8 @@ class Notifier:
             self.app.add_handler(CommandHandler("interval", self._set_interval_command))
             self.app.add_handler(CommandHandler("mode", self._set_mode_command))
             self.app.add_handler(CommandHandler("prev", self._prev_command))
-            self.app.add_handler(CommandHandler("market", self._market_command)) # New command
+            self.app.add_handler(CommandHandler("show", self._show_command))
+            self.app.add_handler(CommandHandler("market", self._market_command))
             self.app.add_handler(CommandHandler("check", self._check_command)) # New command
             self.app.add_handler(CommandHandler("apicheck", self._api_usage_command)) # New command
             self.app.add_handler(CommandHandler("test", self._test_command)) # New command for testing
@@ -39,6 +40,7 @@ class Notifier:
             self.api_usage_callback = None # New callback
             self.stock_history_callback = None # New callback
             self.test_callback = None # New callback
+            self.report_callback = None # New callback
 
     async def _debug_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
@@ -77,7 +79,14 @@ class Notifier:
             return
             
         try:
-            # 請求前一交易日資料
+            if self.report_callback:
+                await update.message.reply_text("正在產生前一交易日圖形化報告...")
+                img_path, caption = await self.report_callback(offset=1)
+                if img_path:
+                    await self.send_photo(img_path, caption=f"📊 **前一交易日收盤報告**\n{caption}")
+                    return
+            
+            # Fallback to text
             summary = await self.data_callback(offset=1)
             if not summary:
                 await update.message.reply_text("無法獲取前一交易日資料 (可能資料尚未更新或 API 限制)。")
@@ -118,6 +127,10 @@ class Notifier:
     def set_test_callback(self, callback):
         """設定用於手動測試報告的回呼函式"""
         self.test_callback = callback
+
+    def set_report_callback(self, callback):
+        """設定用於獲取圖形化報告回呼函式"""
+        self.report_callback = callback
 
     async def _set_interval_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not context.args:
@@ -333,6 +346,29 @@ class Notifier:
         else:
             await update.message.reply_text(f"目前停止警報清單：{', '.join(self.stopped_symbols)}")
 
+    async def _show_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """顯示目前監控標的的即時報告"""
+        if not self.data_callback:
+            await update.message.reply_text("系統尚未準備好，請稍後再試。")
+            return
+            
+        try:
+            if self.report_callback:
+                await update.message.reply_text("正在產生即時圖形化報告...")
+                img_path, caption = await self.report_callback(offset=0)
+                if img_path:
+                    await self.send_photo(img_path, caption=f"🚀 **目前監控標的即時報價**\n{caption}")
+                    return
+
+            summary = await self.data_callback()
+            if not summary:
+                await update.message.reply_text("目前監控清單為空。")
+            else:
+                await update.message.reply_text(f"🚀 **目前監控標的即時報價**\n\n{summary}", parse_mode='Markdown')
+        except Exception as e:
+            await update.message.reply_text(f"❌ 查詢時發生錯誤: {e}")
+            print(f"Error in _show_command: {e}")
+
     async def _test_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """手動觸發測試報告"""
         if not self.test_callback:
@@ -368,9 +404,21 @@ class Notifier:
 
         try:
             await self.app.bot.send_message(chat_id=self.chat_id, text=text, parse_mode='Markdown')
-            print(f"Telegram 訊息已發送: {text}")
+            print(f"Telegram 訊息已發送 (文字)")
         except Exception as e:
             print(f"發送 Telegram 訊息時發生錯誤: {e}")
+
+    async def send_photo(self, photo_path, caption=None):
+        if not self.app or not self.chat_id:
+            print("Telegram 未設定，無法發送圖片")
+            return
+
+        try:
+            with open(photo_path, 'rb') as photo:
+                await self.app.bot.send_photo(chat_id=self.chat_id, photo=photo, caption=caption, parse_mode='Markdown')
+            print(f"Telegram 圖片已發送: {photo_path}")
+        except Exception as e:
+            print(f"發送 Telegram 圖片時發生錯誤: {e}")
 
     def is_stopped(self, symbol):
         return symbol.upper() in self.stopped_symbols

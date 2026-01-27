@@ -7,3 +7,5 @@ httpx
 pandas
 tqdm
 yfinance
+matplotlib
+Pillow

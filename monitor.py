@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from price_fetcher import PriceFetcher
 from notion_helper import NotionHelper
 from notifier import Notifier
+from report_generator import ReportGenerator
 
 load_dotenv()
 
@@ -15,7 +16,8 @@ class MarketMonitor:
         self.fetcher = PriceFetcher()
         self.notion = NotionHelper()
         self.notifier = Notifier()
-        self.interval = int(os.getenv("CHECK_INTERVAL_SECONDS", 1800))
+        self.generator = ReportGenerator()
+        self.interval = int(os.getenv("CHECK_INTERVAL_SECONDS", 600))
         self.allow_outside = os.getenv("ALLOW_OUTSIDE_MARKET_HOURS", "false").lower() == "true"
         self.last_open_date = None
         self.last_close_date = None
@@ -145,38 +147,78 @@ class MarketMonitor:
             return True
         return False
 
-    async def get_detailed_summary(self, offset=0):
-        """回傳目前所有監控標的的詳細摘要 (開、收、高、低、MA20)"""
+    async def get_report_data(self, offset=0):
+        """獲取用於報告的結構化數據"""
         items = self.notion.get_monitoring_list()
-        if not items:
-            return "目前監控清單為空。"
-            
-        lines = []
-        date_info = ""
+        stock_list = []
+        date_str = "---"
+        
         for item in items:
             symbol = item['symbol']
             stats = self.fetcher.get_full_stats(symbol, offset=offset)
-            
-            if not stats:
-                lines.append(f"• **{item['name']}** ({symbol}): 無法獲取詳細資料")
-                continue
-            
-            if not date_info:
-                date_info = f"📅 基準日期: `{stats['date']}`\n\n"
-            
-            # 漲跌幅顯示處理
-            change_str = "---"
-            if stats['change_pct'] is not None:
-                emoji = "🔴" if stats['change_pct'] > 0 else "🟢" if stats['change_pct'] < 0 else "⚪"
-                change_str = f"{emoji} {stats['change_pct']}%"
+            if stats:
+                if date_str == "---":
+                    date_str = stats['date']
                 
-            line = f"• **{item['name']}** ({symbol})\n"
-            line += f"  收: `{stats['close']}` ({change_str})\n"
-            line += f"  開: `{stats['open']}` / 高: `{stats['high']}` / 低: `{stats['low']}`\n"
-            line += f"  量: `{stats['volume']:,}` / MA20: `{stats['ma20'] or '計算中'}`"
+                ma_status = "---"
+                if stats['close'] and stats['ma20']:
+                    ma_status = "📈 站上 MA20" if stats['close'] >= stats['ma20'] else "📉 跌破 MA20"
+                
+                stock_list.append({
+                    "name": item['name'],
+                    "symbol": symbol,
+                    "close": stats['close'],
+                    "change_pct": stats['change_pct'],
+                    "ma20_status": ma_status,
+                    "open": stats['open'],
+                    "high": stats['high'],
+                    "low": stats['low'],
+                    "volume": stats['volume']
+                })
+        
+        # 獲取市場買賣力道
+        sentiment_data = None
+        m_stats = self.fetcher.get_market_order_stats()
+        if m_stats:
+            diff_vol = m_stats['total_buy_volume'] - m_stats['total_sell_volume']
+            sentiment = "🐂 偏多" if diff_vol > 0 else "Bearish" # Placeholder logic, will refine in monitor
+            overheat_index = (m_stats['total_deal_volume'] / m_stats['total_buy_volume']) * 100 if m_stats['total_buy_volume'] > 0 else 0
+            sentiment_data = {
+                "date": m_stats['date'],
+                "time": m_stats['time'],
+                "sentiment": "🐂 偏多" if diff_vol > 0 else "🐻 偏空",
+                "diff_vol": diff_vol,
+                "overheat_index": overheat_index
+            }
+
+        return {
+            "date": date_str,
+            "stock_list": stock_list,
+            "sentiment": sentiment_data
+        }
+
+    async def get_detailed_summary(self, offset=0):
+        """回傳目前所有監控標的的詳細摘要 (開、收、高、低、MA20)"""
+        data = await self.get_report_data(offset=offset)
+        if not data['stock_list']:
+            return "目前監控清單為空或無法獲取資料。"
+            
+        lines = [f"📅 基準日期: `{data['date']}`\n"]
+        for s in data['stock_list']:
+            change_str = "---"
+            if s['change_pct'] is not None:
+                emoji = "🔴" if s['change_pct'] > 0 else "🟢" if s['change_pct'] < 0 else "⚪"
+                change_str = f"{emoji} {s['change_pct']}%"
+                
+            line = (
+                f"• **{s['name']}** ({s['symbol']})\n"
+                f"  收: `{s['close']}` ({change_str})\n"
+                f"  開: `{s['open']}` / 高: `{s['high']}` / 低: `{s['low']}`\n"
+                f"  量: `{s['volume']:,}` / MA20: `{s['ma20_status']}`"
+            )
             lines.append(line)
             
-        return date_info + "\n\n".join(lines)
+        return "\n".join(lines)
 
     async def change_config_callback(self, interval=None, allow_outside=None):
         """處理來自 Telegram 的系統配置修改請求"""
@@ -203,7 +245,6 @@ class MarketMonitor:
             return None
             
         lines = [f"📈 **{symbol} 歷史成交數據 (近 5 日)**\n"]
-        
         for s in stats_list:
             fetch_info = f" (擷取於 {s['fetch_time']})" if 'fetch_time' in s else ""
             line = (
@@ -214,8 +255,21 @@ class MarketMonitor:
                 f"  MA5: `{s['ma5'] or '---'}` | MA20: `{s['ma20'] or '---'}`\n"
             )
             lines.append(line)
-            
         return "\n".join(lines)
+
+    async def get_graphical_report_callback(self, offset=0):
+        """用於回傳圖形化報告的路徑與說明文字"""
+        report_data = await self.get_report_data(offset=offset)
+        if not report_data['stock_list']:
+            return None, "目前監控清單為空或資料失效。"
+            
+        try:
+            img_path = self.generator.generate_closing_report(report_data['sentiment'], report_data['stock_list'])
+            caption = f"數據日期: `{report_data['date']}`"
+            return img_path, caption
+        except Exception as e:
+            print(f"回調產生圖片報告失敗: {e}")
+            return None, f"圖片生成失敗: {e}"
 
     async def test_report_callback(self, report_type):
         """用於測試發送各種自動化報告"""
@@ -252,11 +306,18 @@ class MarketMonitor:
                 )
                 await self.notifier.send_message(message)
                 return True
-        elif report_type == "daily":
-            summary = await self.get_detailed_summary()
-            message = f"🔔 **[測試] 監控標的盤後報告**\n\n{summary}"
-            await self.notifier.send_message(message)
-            return True
+        if report_type == "daily":
+            report_data = await self.get_report_data(offset=0)
+            try:
+                img_path = self.generator.generate_closing_report(report_data['sentiment'], report_data['stock_list'])
+                await self.notifier.send_photo(img_path, caption=f"🔔 **[測試] 監控標的盤後綜合報告**")
+                return True
+            except Exception as e:
+                print(f"圖片生成失敗: {e}")
+                summary = await self.get_detailed_summary()
+                message = f"🔔 **[測試] 監控標的盤後報告**\n\n{summary}"
+                await self.notifier.send_message(message)
+                return True
         return False
 
     async def run_monitor_loop(self):
@@ -298,33 +359,26 @@ class MarketMonitor:
                     # 14:00 盤後綜合大報告 (包含收盤總結、買賣力道、詳細標的數據)
                     if dt_time(14, 0) <= curr_time < dt_time(14, 20):
                         if self.last_daily_report_date != today:
-                            # 1. 獲取市場買賣力道
-                            sentiment_msg = ""
-                            stats = self.fetcher.get_market_order_stats()
-                            if stats:
-                                diff_vol = stats['total_buy_volume'] - stats['total_sell_volume']
-                                sentiment = "🐂 偏多" if diff_vol > 0 else "🐻 偏空"
-                                overheat_index = (stats['total_deal_volume'] / stats['total_buy_volume']) * 100 if stats['total_buy_volume'] > 0 else 0
-                                sentiment_msg = (
-                                    f"📊 **市場買賣力道統計**\n"
-                                    f"• 買賣量差: `{diff_vol:+,}` | **氣氛: {sentiment}**\n"
-                                    f"• **過熱指數**: `{overheat_index:.2f}%` (成交/委買)\n"
-                                    f"• 數據日期: `{stats['date']}` ({stats['time']})\n\n"
-                                )
+                            report_data = await self.get_report_data(offset=0)
                             
-                            # 2. 獲取監控標的詳細摘要
-                            summary = await self.get_detailed_summary()
-                            
-                            message = (
-                                f"🏁 **台股每日盤後綜合報告 (14:00)**\n\n"
-                                f"{sentiment_msg}"
-                                f"📋 **監控標的收盤摘要**\n"
-                                f"{summary}"
-                            )
-                            
-                            await self.notifier.send_message(message)
+                            try:
+                                # 嘗試生成圖片報告
+                                img_path = self.generator.generate_closing_report(report_data['sentiment'], report_data['stock_list'])
+                                caption = f"🏁 **台股每日盤後綜合報告 (14:00)**\n\n數據日期: `{report_data['date']}`"
+                                await self.notifier.send_photo(img_path, caption=caption)
+                            except Exception as e:
+                                print(f"圖片報告生成失敗，改發送文字: {e}")
+                                # 備援發送文字報告
+                                sentiment_msg = ""
+                                if report_data['sentiment']:
+                                    s = report_data['sentiment']
+                                    sentiment_msg = f"📊 **市場氣氛: {s['sentiment']}** | 量差: `{s['diff_vol']:+,}` | 過熱: `{s['overheat_index']:.2f}%` \n\n"
+                                
+                                summary = await self.get_detailed_summary(offset=0)
+                                message = f"🏁 **台股每日盤後綜合報告 (14:00)**\n\n{sentiment_msg}📋 **監控標的摘要**\n{summary}"
+                                await self.notifier.send_message(message)
+                                
                             self.last_daily_report_date = today
-                            # 同步更新其他旗標以避免重複觸發(如果未來又拆開的話)
                             self.last_close_date = today
                             self.last_order_stats_date = today
 
@@ -358,6 +412,7 @@ class MarketMonitor:
         self.notifier.set_api_usage_callback(self.get_api_usage_callback)
         self.notifier.set_stock_history_callback(self.get_stock_history_callback)
         self.notifier.set_test_callback(self.test_report_callback)
+        self.notifier.set_report_callback(self.get_graphical_report_callback)
         
         # 獲取 Telegram Application
         app = self.notifier.app
