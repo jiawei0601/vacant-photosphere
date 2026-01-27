@@ -267,7 +267,8 @@ class Notifier:
                 )
                 
                 # 增加富果備援顯示
-                fugle_status = "✅ 已設定" if os.getenv("FUGLE_API_TOKEN") else "❌ 未設定"
+                fugle_key = os.getenv("FUGLE_API_TOKEN") or os.getenv("富果API KEY") or os.getenv("富果API_KEY")
+                fugle_status = "✅ 已設定" if fugle_key else "❌ 未設定"
                 msg += f"\n\n🛠️ **備援系統**\n• 富果 Fugle API: {fugle_status}"
                 
                 await update.message.reply_text(msg, parse_mode='Markdown')

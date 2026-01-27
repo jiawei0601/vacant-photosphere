@@ -10,7 +10,10 @@ load_dotenv()
 class PriceFetcher:
     def __init__(self):
         self.api_token = os.getenv("FINMIND_TOKEN", "").strip()
-        self.fugle_token = os.getenv("FUGLE_API_TOKEN", "").strip()
+        # 支援多種可能的環境變數名稱，以相容 Railway 上的設定
+        self.fugle_token = (os.getenv("FUGLE_API_TOKEN") or 
+                            os.getenv("富果API KEY") or 
+                            os.getenv("富果API_KEY") or "").strip()
         self.loader = DataLoader()
         if self.api_token:
             print("正在使用 Token 登入 FinMind...")
