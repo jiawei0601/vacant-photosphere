@@ -15,16 +15,33 @@ class PriceFetcher:
             self.loader.login_by_token(api_token=self.api_token)
         else:
             print("警告: 未設定 FINMIND_TOKEN，可能導致 API 存取受限或失敗")
+        
+        # 快取機制設定
+        self.price_cache = {} # 格式: {symbol: {"price": float, "time": datetime, "full_stats": dict}}
+        self.cache_duration = int(os.getenv("CACHE_DURATION_SECONDS", 300))
 
     def get_last_price(self, symbol):
         """
-        獲取股票或權證的最新成交價
+        獲取股票或權證的最新成交價 (支援快取)
+        回傳: {"price": float, "time": str, "is_cached": bool} 或 None
         """
+        from datetime import datetime, timedelta
+        
+        # 檢查快取
+        now = datetime.now()
+        if symbol in self.price_cache:
+            cache_data = self.price_cache[symbol]
+            if now - cache_data['time'] < timedelta(seconds=self.cache_duration):
+                return {
+                    "price": cache_data['price'],
+                    "time": cache_data['time'].strftime("%H:%M:%S"),
+                    "is_cached": True
+                }
+
         try:
-            from datetime import datetime, timedelta
             # 取得最近幾天的資料以確保能拿到最後一筆成交價
-            end_date = datetime.now().strftime("%Y-%m-%d")
-            start_date = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d")
+            end_date = now.strftime("%Y-%m-%d")
+            start_date = (now - timedelta(days=5)).strftime("%Y-%m-%d")
             
             df = self.loader.taiwan_stock_daily(
                 stock_id=symbol,
@@ -33,20 +50,27 @@ class PriceFetcher:
             )
             
             if df is not None and not df.empty:
-                # 統一欄位名稱為小寫
                 df.columns = [c.lower() for c in df.columns]
                 if 'close' in df.columns:
-                    # 取得最後一筆非 NaN 的收盤價
                     non_nan_df = df.dropna(subset=['close'])
                     if not non_nan_df.empty:
-                        return float(non_nan_df.iloc[-1]['close'])
+                        price = float(non_nan_df.iloc[-1]['close'])
+                        # 更新快取
+                        self.price_cache[symbol] = {
+                            "price": price,
+                            "time": now
+                        }
+                        return {
+                            "price": price,
+                            "time": now.strftime("%H:%M:%S"),
+                            "is_cached": False
+                        }
                 
-                print(f"[{symbol}] 找不到有效的 'close' 欄位資料。可用欄位: {df.columns.tolist()}")
+                print(f"[{symbol}] 找不到有效的 'close' 欄位資料。")
                 return None
             else:
                 print(f"[{symbol}] taiwan_stock_daily 未回傳資料。")
                 return None
-            return None
         except KeyError as e:
             if str(e) == "'data'":
                 print(f"[{symbol}] 獲取失敗: API 回傳格式錯誤 (KeyError: 'data')。這通常是因為未設定 FINMIND_TOKEN 或已達 API 使用上限。")
@@ -55,8 +79,6 @@ class PriceFetcher:
             return None
         except Exception as e:
             print(f"獲取價格時發生錯誤: {e}")
-            import traceback
-            traceback.print_exc()
             return None
 
     def get_five_day_stats(self, symbol):
@@ -101,7 +123,8 @@ class PriceFetcher:
                         "low": float(low_val),
                         "volume": int(row.get('trading_volume', 0)),
                         "ma5": round(float(row.get('ma5', 0)), 2) if not pd.isna(row.get('ma5')) else None,
-                        "ma20": round(float(row.get('ma20', 0)), 2) if not pd.isna(row.get('ma20')) else None
+                        "ma20": round(float(row.get('ma20', 0)), 2) if not pd.isna(row.get('ma20')) else None,
+                        "fetch_time": datetime.now().strftime("%H:%M:%S")
                     })
                 
                 return stats_list

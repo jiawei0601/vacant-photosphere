@@ -52,28 +52,34 @@ class MarketMonitor:
         
         for item in items:
             symbol = item['symbol']
-            price = self.fetcher.get_last_price(symbol)
+            price_data = self.fetcher.get_last_price(symbol)
             
-            if price is None:
+            if price_data is None:
                 fail_count += 1
                 continue
+            
+            price = price_data['price']
+            fetch_time = price_data['time']
+            is_cached = price_data.get('is_cached', False)
                 
             success_count += 1
-            print(f"處理 {item['name']} ({symbol}): 當前價格 {price}")
+            cache_tag = " (快取)" if is_cached else ""
+            print(f"處理 {item['name']} ({symbol}): 當前價格 {price} {cache_tag}")
             
             status = "正常"
             alert_msg = ""
             
             # 檢查警戒值
             is_triggered = False
+            time_info = f"\n(資料時間: {fetch_time}{' 快取' if is_cached else ''})"
             if item['high_alert'] and price >= item['high_alert']:
                 is_triggered = True
                 status = "警戒"
-                alert_msg = f"🔔 持續警報：[{item['name']} ({symbol})] 當前價格 {price} >= 上限 {item['high_alert']}\n(回覆 /stop {symbol} 停止警報)"
+                alert_msg = f"🔔 持續警報：[{item['name']} ({symbol})] 當前價格 {price} >= 上限 {item['high_alert']}{time_info}\n(回覆 /stop {symbol} 停止警報)"
             elif item['low_alert'] and price <= item['low_alert']:
                 is_triggered = True
                 status = "警戒"
-                alert_msg = f"🔔 持續警報：[{item['name']} ({symbol})] 當前價格 {price} <= 下限 {item['low_alert']}\n(回覆 /stop {symbol} 停止警報)"
+                alert_msg = f"🔔 持續警報：[{item['name']} ({symbol})] 當前價格 {price} <= 下限 {item['low_alert']}{time_info}\n(回覆 /stop {symbol} 停止警報)"
             
             # 處理持續警報邏輯
             if is_triggered:
@@ -108,11 +114,13 @@ class MarketMonitor:
             symbol = item['symbol']
             price = item.get('current_price', '---')
             status = item.get('status', '正常')
+            update_time = item.get('last_updated', '---')
             
             # 格式化輸出
             line = f"• **{item['name']}** ({symbol})\n"
             line += f"  價: `{price}` | 限: `{item['low_alert']} ~ {item['high_alert']}`\n"
-            line += f"  狀態: {status}{' (已暫停)' if self.notifier.is_stopped(symbol) else ''}"
+            line += f"  狀態: {status}{' (已暫停)' if self.notifier.is_stopped(symbol) else ''}\n"
+            line += f"  (更新時間: {update_time})"
             lines.append(line)
             
         return "\n\n".join(lines)
@@ -188,8 +196,9 @@ class MarketMonitor:
         lines = [f"📈 **{symbol} 歷史成交數據 (近 5 日)**\n"]
         
         for s in stats_list:
+            fetch_info = f" (擷取於 {s['fetch_time']})" if 'fetch_time' in s else ""
             line = (
-                f"📅 `{s['date']}`\n"
+                f"📅 `{s['date']}`{fetch_info}\n"
                 f"  開: `{s['open']}` | 收: `{s['close']}`\n"
                 f"  高: `{s['high']}` | 低: `{s['low']}`\n"
                 f"  量: `{s['volume']:,}`\n"
