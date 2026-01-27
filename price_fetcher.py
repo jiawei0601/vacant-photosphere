@@ -357,25 +357,27 @@ class PriceFetcher:
     def get_market_order_stats(self):
         """
         獲取台股全市場每 5 秒委託成交統計 (買賣力道)
-        資料集: TaiwanStockStatisticsOfOrderBookAndTrade
+        若當日無資料，自動嘗試獲取最近一筆可用資料
         """
         try:
-            from datetime import datetime
-            today = datetime.now().strftime("%Y-%m-%d")
+            from datetime import datetime, timedelta
+            now = datetime.now()
+            # 抓取最近 7 天的資料以確保至少能拿到前一個交易日
+            start_date = (now - timedelta(days=7)).strftime("%Y-%m-%d")
             
-            # 使用通用 get_data 獲取資料
             df = self.loader.get_data(
                 dataset="TaiwanStockStatisticsOfOrderBookAndTrade",
-                start_date=today
+                start_date=start_date
             )
             
             if df is not None and not df.empty:
                 # 統一欄位名稱為小寫
                 df.columns = [c.lower() for c in df.columns]
-                # 取得最後一筆 (13:30 收盤後的統計資訊)
+                # 取得最後一筆 (最新可用資料)
                 last_row = df.iloc[-1]
                 return {
                     "time": last_row.get("time", "---"),
+                    "date": last_row.get("date", "---"),
                     "total_buy_order": int(last_row.get("total_buy_order", 0)),
                     "total_sell_order": int(last_row.get("total_sell_order", 0)),
                     "total_buy_volume": int(last_row.get("total_buy_volume", 0)),

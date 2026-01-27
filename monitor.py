@@ -236,13 +236,14 @@ class MarketMonitor:
                 overheat_index = (stats['total_deal_volume'] / stats['total_buy_volume']) * 100 if stats['total_buy_volume'] > 0 else 0
                 message = (
                     f"📊 **[測試] 台股全市場委託成交統計**\n\n"
+                    f"• 數據日期: `{stats['date']}`\n"
                     f"• 總委買筆數: `{stats['total_buy_order']:,}`\n"
                     f"• 總委賣筆數: `{stats['total_sell_order']:,}`\n"
                     f"• 總成交量: `{stats['total_deal_volume']:,}`\n"
                     f"• 買賣量差: `{diff_vol:+,}`\n"
                     f"• **過熱指數**: `{overheat_index:.2f}%` (成交/委買)\n"
                     f"• 市場氣氛: **{sentiment}**\n\n"
-                    f"(數據時間: {stats['time']})"
+                    f"(統計時間: {stats['time']})"
                 )
                 await self.notifier.send_message(message)
                 return True
@@ -307,6 +308,7 @@ class MarketMonitor:
                                 overheat_index = (stats['total_deal_volume'] / stats['total_buy_volume']) * 100 if stats['total_buy_volume'] > 0 else 0
                                 message = (
                                     f"📊 **台股全市場委託成交統計 (13:45)**\n\n"
+                                    f"• 數據日期: `{stats['date']}`\n"
                                     f"• 總委買筆數: `{stats['total_buy_order']:,}`\n"
                                     f"• 總委賣筆數: `{stats['total_sell_order']:,}`\n"
                                     f"• 總委買成交量: `{stats['total_buy_volume']:,}`\n"
@@ -315,7 +317,7 @@ class MarketMonitor:
                                     f"• 買賣量差: `{diff_vol:+,}`\n"
                                     f"• **過熱指數**: `{overheat_index:.2f}%` (成交/委買)\n"
                                     f"• 市場氣氛: **{sentiment}**\n\n"
-                                    f"(數據時間: {stats['time']})"
+                                    f"(統計時間: {stats['time']})"
                                 )
                                 await self.notifier.send_message(message)
                                 self.last_order_stats_date = today
