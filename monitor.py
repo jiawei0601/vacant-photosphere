@@ -22,6 +22,7 @@ class MarketMonitor:
         self.last_noon_date = None
         self.last_daily_report_date = None
         self.last_order_stats_date = None
+        self.last_check_time = 0
 
     def is_market_open(self):
         """
@@ -211,8 +212,50 @@ class MarketMonitor:
             
         return "\n".join(lines)
 
+    async def test_report_callback(self, report_type):
+        """用於測試發送各種自動化報告"""
+        today = datetime.now().date()
+        if report_type == "noon":
+            price, ma20 = self.fetcher.get_ticker_ma("^TWII", window=20)
+            if price and ma20:
+                status = "📈 站上 MA20" if price >= ma20 else "📉 跌破 MA20"
+                message = (
+                    f"🕛 **[測試] 午間台股加權指數報告**\n\n"
+                    f"• 目前指數: `{price:,.2f}`\n"
+                    f"• 指數 MA20 : `{ma20:,.2f}`\n"
+                    f"• 當前狀態: **{status}**\n\n"
+                    f"系統持續監控中..."
+                )
+                await self.notifier.send_message(message)
+                return True
+        elif report_type == "sentiment":
+            stats = self.fetcher.get_market_order_stats()
+            if stats:
+                diff_vol = stats['total_buy_volume'] - stats['total_sell_volume']
+                sentiment = "🐂 偏多" if diff_vol > 0 else "🐻 偏空"
+                overheat_index = (stats['total_deal_volume'] / stats['total_buy_volume']) * 100 if stats['total_buy_volume'] > 0 else 0
+                message = (
+                    f"📊 **[測試] 台股全市場委託成交統計**\n\n"
+                    f"• 總委買筆數: `{stats['total_buy_order']:,}`\n"
+                    f"• 總委賣筆數: `{stats['total_sell_order']:,}`\n"
+                    f"• 總成交量: `{stats['total_deal_volume']:,}`\n"
+                    f"• 買賣量差: `{diff_vol:+,}`\n"
+                    f"• **過熱指數**: `{overheat_index:.2f}%` (成交/委買)\n"
+                    f"• 市場氣氛: **{sentiment}**\n\n"
+                    f"(數據時間: {stats['time']})"
+                )
+                await self.notifier.send_message(message)
+                return True
+        elif report_type == "daily":
+            summary = await self.get_detailed_summary()
+            message = f"🔔 **[測試] 監控標的盤後報告**\n\n{summary}"
+            await self.notifier.send_message(message)
+            return True
+        return False
+
     async def run_monitor_loop(self):
         """背景執行的監控迴圈"""
+        print(f"監控迴圈啟動 (主檢查間隔: {self.interval} 秒)")
         while True:
             try:
                 now = datetime.now()
@@ -220,28 +263,18 @@ class MarketMonitor:
                 curr_time = now.time()
                 is_weekday = now.weekday() <= 4
 
-                # 處理開盤與收盤通知 (僅在非 24H 模式下強制執行，或作為每日常規提醒)
-                if not self.allow_outside and is_weekday:
+                # 1. 檢查各項定時報告 (不論是否開盤，只要是工作日)
+                if is_weekday:
                     # 09:00 開盤提醒
-                    if curr_time >= dt_time(9, 0) and curr_time < dt_time(9, 10):
+                    if dt_time(9, 0) <= curr_time < dt_time(9, 15):
                         if self.last_open_date != today:
-                            # 獲取前一日摘要
                             prev_summary = await self.get_detailed_summary(offset=1)
                             message = f"☀️ **台股今日開盤**！\n\n📊 **前一交易日收盤報告**\n{prev_summary}\n\n系統已開始監控..."
                             await self.notifier.send_message(message)
                             self.last_open_date = today
                     
-                    # 13:30 收盤總結
-                    if curr_time >= dt_time(13, 30) and curr_time < dt_time(13, 50):
-                        if self.last_close_date != today:
-                            # 獲取詳細摘要
-                            summary = await self.get_detailed_summary()
-                            message = f"📉 **台股今日收盤總結**\n\n{summary}\n\n本日監控任務結束，明日再會！"
-                            await self.notifier.send_message(message)
-                            self.last_close_date = today
-                    
-                    # 12:00 中午加權指數與 MA20 報告
-                    if curr_time >= dt_time(12, 0) and curr_time < dt_time(12, 20):
+                    # 12:00 中午報告
+                    if dt_time(12, 0) <= curr_time < dt_time(12, 15):
                         if self.last_noon_date != today:
                             price, ma20 = self.fetcher.get_ticker_ma("^TWII", window=20)
                             if price and ma20:
@@ -255,28 +288,23 @@ class MarketMonitor:
                                 )
                                 await self.notifier.send_message(message)
                                 self.last_noon_date = today
-                    
-                    # 14:00 追蹤標的詳細報告
-                    if curr_time >= dt_time(14, 0) and curr_time < dt_time(14, 20):
-                        if self.last_daily_report_date != today:
-                            summary = await self.get_detailed_summary()
-                            message = f"🔔 **每日追蹤標的盤後報告 (14:00)**\n\n{summary}"
+
+                    # 13:30 收盤總結
+                    if dt_time(13, 30) <= curr_time < dt_time(13, 45):
+                        if self.last_close_date != today:
+                            summary = await self.get_detailed_summary(offset=0)
+                            message = f"📉 **台股今日收盤總結**\n\n{summary}\n\n本日監控任務結束，明日再會！"
                             await self.notifier.send_message(message)
-                            self.last_daily_report_date = today
-                    
-                    # 13:45 全市場買賣力道報告
-                    if curr_time >= dt_time(13, 45) and curr_time < dt_time(14, 5):
+                            self.last_close_date = today
+
+                    # 13:45 買賣力道量
+                    if dt_time(13, 45) <= curr_time < dt_time(14, 0):
                         if self.last_order_stats_date != today:
                             stats = self.fetcher.get_market_order_stats()
                             if stats:
                                 diff_vol = stats['total_buy_volume'] - stats['total_sell_volume']
                                 sentiment = "🐂 偏多" if diff_vol > 0 else "🐻 偏空"
-                                
-                                # 計算過熱指數: 累積成交數量 / 累積委託買進數量
-                                overheat_index = 0
-                                if stats['total_buy_volume'] > 0:
-                                    overheat_index = (stats['total_deal_volume'] / stats['total_buy_volume']) * 100
-                                
+                                overheat_index = (stats['total_deal_volume'] / stats['total_buy_volume']) * 100 if stats['total_buy_volume'] > 0 else 0
                                 message = (
                                     f"📊 **台股全市場委託成交統計 (13:45)**\n\n"
                                     f"• 總委買筆數: `{stats['total_buy_order']:,}`\n"
@@ -292,14 +320,30 @@ class MarketMonitor:
                                 await self.notifier.send_message(message)
                                 self.last_order_stats_date = today
 
+                    # 14:00 詳細報告
+                    if dt_time(14, 0) <= curr_time < dt_time(14, 15):
+                        if self.last_daily_report_date != today:
+                            summary = await self.get_detailed_summary()
+                            message = f"🔔 **每日追蹤標的盤後報告 (14:00)**\n\n{summary}"
+                            await self.notifier.send_message(message)
+                            self.last_daily_report_date = today
+
+                # 2. 處理常規價格檢查
                 if self.is_market_open():
-                    await self.check_once()
+                    import time as py_time
+                    current_unix = py_time.time()
+                    if current_unix - self.last_check_time >= self.interval:
+                        await self.check_once()
+                        self.last_check_time = current_unix
                 else:
-                    print(f"[{datetime.now()}] 非交易時段，休眠中...")
+                    # 非開盤時間不需要執行 check_once，除非環境變數有開
+                    pass
+
             except Exception as e:
                 print(f"監控迴圈發生錯誤: {e}")
             
-            await asyncio.sleep(self.interval)
+            # 迴圈固定每分鐘運行一次，以確保不漏掉定時報告
+            await asyncio.sleep(60)
 
     def run(self):
         """啟動程式 (整合 Telegram run_polling)"""
@@ -313,6 +357,7 @@ class MarketMonitor:
         self.notifier.set_check_callback(self.check_once)
         self.notifier.set_api_usage_callback(self.get_api_usage_callback)
         self.notifier.set_stock_history_callback(self.get_stock_history_callback)
+        self.notifier.set_test_callback(self.test_report_callback)
         
         # 獲取 Telegram Application
         app = self.notifier.app

@@ -27,6 +27,7 @@ class Notifier:
             self.app.add_handler(CommandHandler("market", self._market_command)) # New command
             self.app.add_handler(CommandHandler("check", self._check_command)) # New command
             self.app.add_handler(CommandHandler("apicheck", self._api_usage_command)) # New command
+            self.app.add_handler(CommandHandler("test", self._test_command)) # New command for testing
             self.app.add_handler(CommandHandler("help", self._help_command))
             from telegram.ext import MessageHandler, filters
             self.app.add_handler(MessageHandler(filters.ALL, self._debug_handler))
@@ -37,6 +38,7 @@ class Notifier:
             self.check_callback = None # New callback
             self.api_usage_callback = None # New callback
             self.stock_history_callback = None # New callback
+            self.test_callback = None # New callback
 
     async def _debug_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
@@ -50,7 +52,8 @@ class Notifier:
                 "• `/check` - 立即執行一次價格檢查與警報觸發\n"
                 "• `/market` - 顯示全球指數 (台/美股、能源、匯率、加密貨幣)\n"
                 "• `/list [代碼]` - 查詢標的近 5 日詳細 K 線與 MA 數據\n"
-                "• `/apicheck` - 查詢 API 剩餘額度與備援狀態\n\n"
+                "• `/apicheck` - 查詢 API 剩餘額度與備援狀態\n"
+                "• `/test [類別]` - 手動測試報告 (noon/sentiment/daily)\n\n"
                 "📋 **監控與報告**\n"
                 "• `/show` - 顯示目前所有監控中的標的報價清單\n"
                 "• `/prev` - 顯示前一交易日的完整盤後總結報告\n"
@@ -113,6 +116,10 @@ class Notifier:
     def set_stock_history_callback(self, callback):
         """設定用於獲取股票歷史數據的回呼函式"""
         self.stock_history_callback = callback
+    
+    def set_test_callback(self, callback):
+        """設定用於手動測試報告的回呼函式"""
+        self.test_callback = callback
 
     async def _set_interval_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not context.args:
@@ -327,6 +334,22 @@ class Notifier:
             await update.message.reply_text("目前沒有停止任何警報。")
         else:
             await update.message.reply_text(f"目前停止警報清單：{', '.join(self.stopped_symbols)}")
+
+    async def _test_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """手動觸發測試報告"""
+        if not self.test_callback:
+            await update.message.reply_text("系統尚未準備好。")
+            return
+            
+        if not context.args:
+            await update.message.reply_text("請指定測試類別：\n`/test noon` - 午間大盤\n`/test sentiment` - 買賣力道\n`/test daily` - 標的總結", parse_mode='Markdown')
+            return
+            
+        action = context.args[0].lower()
+        await update.message.reply_text(f"正在生成測試報告: {action}...")
+        success = await self.test_callback(action)
+        if not success:
+            await update.message.reply_text(f"❌ 測試報告生成失敗，請檢查類別名稱或 API 狀態。")
 
     async def start_listening(self):
         """啟動機器人監聽指令"""
