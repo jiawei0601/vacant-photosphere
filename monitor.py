@@ -1,7 +1,7 @@
 import os
 import time
 import asyncio
-from datetime import datetime, time as dt_time
+from datetime import datetime, time as dt_time, timezone, timedelta
 from dotenv import load_dotenv
 
 from price_fetcher import PriceFetcher
@@ -23,6 +23,11 @@ class MarketMonitor:
         self.last_daily_report_date = None
         self.last_order_stats_date = None
         self.last_check_time = 0
+        self.taipei_tz = timezone(timedelta(hours=8))
+
+    def _get_now_taipei(self):
+        """獲取目前的台北時間"""
+        return datetime.now(self.taipei_tz)
 
     def is_market_open(self):
         """
@@ -32,7 +37,7 @@ class MarketMonitor:
         if self.allow_outside:
             return True
             
-        now = datetime.now()
+        now = self._get_now_taipei()
         # 0 為週一, 4 為週五
         if now.weekday() > 4:
             return False
@@ -214,7 +219,7 @@ class MarketMonitor:
 
     async def test_report_callback(self, report_type):
         """用於測試發送各種自動化報告"""
-        today = datetime.now().date()
+        today = self._get_now_taipei().date()
         if report_type == "noon":
             price, ma20 = self.fetcher.get_ticker_ma("^TWII", window=20)
             if price and ma20:
@@ -256,10 +261,10 @@ class MarketMonitor:
 
     async def run_monitor_loop(self):
         """背景執行的監控迴圈"""
-        print(f"監控迴圈啟動 (主檢查間隔: {self.interval} 秒)")
+        print(f"監控迴圈啟動 (主檢查間隔: {self.interval} 秒，時區: 台北 UTC+8)")
         while True:
             try:
-                now = datetime.now()
+                now = self._get_now_taipei()
                 today = now.date()
                 curr_time = now.time()
                 is_weekday = now.weekday() <= 4
