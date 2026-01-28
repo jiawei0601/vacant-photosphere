@@ -8,6 +8,7 @@ from price_fetcher import PriceFetcher
 from notion_helper import NotionHelper
 from notifier import Notifier
 from report_generator import ReportGenerator
+from inventory_ocr import InventoryOCR
 
 load_dotenv()
 
@@ -17,6 +18,7 @@ class MarketMonitor:
         self.notion = NotionHelper()
         self.notifier = Notifier()
         self.generator = ReportGenerator()
+        self.ocr = None # 延遲載入 OCR
         self.interval = int(os.getenv("CHECK_INTERVAL_SECONDS", 600))
         self.allow_outside = os.getenv("ALLOW_OUTSIDE_MARKET_HOURS", "false").lower() == "true"
         self.last_open_date = None
@@ -284,6 +286,26 @@ class MarketMonitor:
             print(f"回調產生 K 線圖失敗: {e}")
             return None
 
+    async def inventory_callback(self, image_path):
+        """處理庫存截圖解析與更新"""
+        if self.ocr is None:
+            self.ocr = InventoryOCR()
+        
+        try:
+            stocks = self.ocr.extract_stock_info(image_path)
+            results = []
+            for s in stocks:
+                success = self.notion.upsert_inventory_item(s['symbol'], s['name'])
+                results.append({
+                    "symbol": s['symbol'],
+                    "name": s['name'],
+                    "status": "成功" if success else "失敗"
+                })
+            return results
+        except Exception as e:
+            print(f"庫存回調執行失敗: {e}")
+            return []
+
     async def get_monitoring_limits_callback(self):
         """獲取目前監控清單與警戒上下限摘要"""
         items = self.notion.get_monitoring_list()
@@ -442,6 +464,7 @@ class MarketMonitor:
         self.notifier.set_report_callback(self.get_graphical_report_callback)
         self.notifier.set_stock_chart_callback(self.get_stock_chart_callback)
         self.notifier.set_monitoring_list_callback(self.get_monitoring_limits_callback)
+        self.notifier.set_inventory_callback(self.inventory_callback)
         
         # 獲取 Telegram Application
         app = self.notifier.app

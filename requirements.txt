@@ -9,3 +9,5 @@ tqdm
 yfinance
 matplotlib
 Pillow
+easyocr
+opencv-python-headless

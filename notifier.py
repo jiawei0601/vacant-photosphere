@@ -33,6 +33,7 @@ class Notifier:
             self.app.add_handler(CommandHandler("test", self._test_command)) # New command for testing
             self.app.add_handler(CommandHandler("help", self._help_command))
             from telegram.ext import MessageHandler, filters
+            self.app.add_handler(MessageHandler(filters.PHOTO, self._photo_handler))
             self.app.add_handler(MessageHandler(filters.ALL, self._debug_handler))
             self.data_callback = None
             self.alert_callback = None
@@ -45,6 +46,7 @@ class Notifier:
             self.report_callback = None # New callback
             self.stock_chart_callback = None # New callback
             self.monitoring_list_callback = None # New callback
+            self.inventory_callback = None # New callback for OCR
 
     async def _debug_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
@@ -144,6 +146,10 @@ class Notifier:
     def set_monitoring_list_callback(self, callback):
         """設定用於獲取監控清單回呼函式"""
         self.monitoring_list_callback = callback
+
+    def set_inventory_callback(self, callback):
+        """設定用於庫存 OCR 的回呼函式"""
+        self.inventory_callback = callback
 
     async def _set_interval_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not context.args:
@@ -434,6 +440,46 @@ class Notifier:
         success = await self.test_callback(action)
         if not success:
             await update.message.reply_text(f"❌ 測試報告生成失敗，請檢查類別名稱或 API 狀態。")
+
+    async def _photo_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """處理接收到的圖片，進行 OCR 辨識"""
+        if not self.inventory_callback:
+            await update.message.reply_text("系統尚未設定庫存解析功能。")
+            return
+
+        try:
+            await update.message.reply_text("🖼️ 接收到圖片，正在準備進行 OCR 辨識，請稍候...")
+            
+            # 下載圖片
+            photo_file = await update.message.photo[-1].get_file()
+            
+            # 建立暫存目錄
+            temp_dir = "temp_images"
+            if not os.path.exists(temp_dir):
+                os.makedirs(temp_dir)
+            
+            file_extension = ".jpg"
+            file_path = os.path.join(temp_dir, f"ocr_{int(time.time())}{file_extension}")
+            await photo_file.download_to_drive(file_path)
+            
+            # 呼叫回呼函數進行解析與更新
+            results = await self.inventory_callback(file_path)
+            
+            if not results:
+                await update.message.reply_text("❌ OCR 辨識失敗或找不到有效的標的代碼。")
+            else:
+                summary = "✅ **庫存更新結果**\n\n"
+                for s in results:
+                    summary += f"• {s['name']} ({s['symbol']}) - {s['status']}\n"
+                await update.message.reply_text(summary, parse_mode='Markdown')
+            
+            # 刪除暫存檔
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                
+        except Exception as e:
+            await update.message.reply_text(f"❌ 處理圖片時發生錯誤: {e}")
+            print(f"Error in _photo_handler: {e}")
 
     async def start_listening(self):
         """啟動機器人監聽指令"""

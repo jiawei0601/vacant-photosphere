@@ -8,6 +8,7 @@ class NotionHelper:
     def __init__(self):
         self.token = os.getenv("NOTION_TOKEN", "").strip()
         self.database_id = os.getenv("NOTION_DATABASE_ID", "").strip()
+        self.inventory_database_id = os.getenv("INVENTORY_DATABASE_ID", "").strip()
         if self.token:
             self.notion = Client(auth=self.token)
         else:
@@ -102,6 +103,52 @@ class NotionHelper:
         # 轉換為台灣時間 (UTC+8)
         tw_time = datetime.now(timezone(timedelta(hours=8)))
         return tw_time.isoformat()
+
+    def upsert_inventory_item(self, symbol, name):
+        """
+        更新或新增庫存資料庫項
+        """
+        if not self.notion or not self.inventory_database_id:
+            print("Notion 或庫存資料庫 ID 未設定")
+            return
+
+        try:
+            # 1. 查詢是否已存在
+            query = self.notion.databases.query(
+                database_id=self.inventory_database_id,
+                filter={
+                    "property": "代碼",
+                    "rich_text": {"equals": symbol}
+                }
+            )
+
+            if query.get("results"):
+                # 已存在，更新日期或狀態
+                page_id = query["results"][0]["id"]
+                self.notion.pages.update(
+                    page_id=page_id,
+                    properties={
+                        "更新時間": {"date": {"start": self._get_now_iso()}},
+                        "狀態": {"status": {"name": "庫存中"}}
+                    }
+                )
+                print(f"更新庫存: {name} ({symbol})")
+            else:
+                # 不存在，新增
+                self.notion.pages.create(
+                    parent={"database_id": self.inventory_database_id},
+                    properties={
+                        "名稱": {"title": [{"text": {"content": name}}]},
+                        "代碼": {"rich_text": [{"text": {"content": symbol}}]},
+                        "更新時間": {"date": {"start": self._get_now_iso()}},
+                        "狀態": {"status": {"name": "庫存中"}}
+                    }
+                )
+                print(f"新增庫存: {name} ({symbol})")
+            return True
+        except Exception as e:
+            print(f"操作 Notion 庫存資料庫時發生錯誤: {e}")
+            return False
 
     def update_alert_prices(self, page_id, high_alert=None, low_alert=None):
         """
