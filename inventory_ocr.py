@@ -11,8 +11,9 @@ class InventoryOCR:
         ch_tra: 繁體中文
         en: 英文
         """
-        print("正在初始化 OCR 引擎 (首次執行可能需要下載模型)...")
-        self.reader = easyocr.Reader(languages)
+        model_path = os.getenv("EASYOCR_MODULE_PATH", None)
+        print(f"正在初始化 OCR 引擎 (模型路徑: {model_path or '預設'})...")
+        self.reader = easyocr.Reader(languages, model_storage_directory=model_path)
 
     def process_image(self, image_path):
         """
