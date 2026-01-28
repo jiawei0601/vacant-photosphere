@@ -104,13 +104,18 @@ class NotionHelper:
         tw_time = datetime.now(timezone(timedelta(hours=8)))
         return tw_time.isoformat()
 
-    def upsert_inventory_item(self, symbol, name):
+    def upsert_inventory_item(self, symbol, name, date_str=None):
         """
         更新或新增庫存資料庫項
         """
         if not self.notion or not self.inventory_database_id:
             print("Notion 或庫存資料庫 ID 未設定")
             return
+
+        target_date = date_str if date_str else self._get_now_iso()
+        # 如果傳入的是 YYYY-MM-DD，轉成 ISO 格式
+        if date_str and len(date_str) == 10:
+             target_date = f"{date_str}T00:00:00.000+08:00"
 
         try:
             # 1. 查詢是否已存在
@@ -128,7 +133,7 @@ class NotionHelper:
                 self.notion.pages.update(
                     page_id=page_id,
                     properties={
-                        "更新時間": {"date": {"start": self._get_now_iso()}},
+                        "更新時間": {"date": {"start": target_date}},
                         "狀態": {"status": {"name": "庫存中"}}
                     }
                 )
@@ -140,7 +145,7 @@ class NotionHelper:
                     properties={
                         "名稱": {"title": [{"text": {"content": name}}]},
                         "代碼": {"rich_text": [{"text": {"content": symbol}}]},
-                        "更新時間": {"date": {"start": self._get_now_iso()}},
+                        "更新時間": {"date": {"start": target_date}},
                         "狀態": {"status": {"name": "庫存中"}}
                     }
                 )

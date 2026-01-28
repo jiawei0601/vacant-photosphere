@@ -286,7 +286,7 @@ class MarketMonitor:
             print(f"回調產生 K 線圖失敗: {e}")
             return None
 
-    async def inventory_callback(self, image_path):
+    async def inventory_callback(self, image_path, upload_date=None):
         """處理庫存截圖解析與更新"""
         if self.ocr is None:
             self.ocr = InventoryOCR()
@@ -295,7 +295,7 @@ class MarketMonitor:
             stocks = self.ocr.extract_stock_info(image_path)
             results = []
             for s in stocks:
-                success = self.notion.upsert_inventory_item(s['symbol'], s['name'])
+                success = self.notion.upsert_inventory_item(s['symbol'], s['name'], date_str=upload_date)
                 results.append({
                     "symbol": s['symbol'],
                     "name": s['name'],

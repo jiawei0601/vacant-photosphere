@@ -1,4 +1,5 @@
 import os
+import time
 import asyncio
 from telegram import Update, Bot
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
@@ -463,7 +464,7 @@ class Notifier:
             await photo_file.download_to_drive(file_path)
             
             # 呼叫回呼函數進行解析與更新
-            results = await self.inventory_callback(file_path)
+            results = await self.inventory_callback(file_path, upload_date=time.strftime("%Y-%m-%d"))
             
             if not results:
                 await update.message.reply_text("❌ OCR 辨識失敗或找不到有效的標的代碼。")
