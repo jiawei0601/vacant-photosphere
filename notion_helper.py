@@ -98,6 +98,51 @@ class NotionHelper:
     def _get_status(self, props, name):
         return props.get(name, {}).get("status", {}).get("name", "正常")
 
+    def clear_inventory_database(self):
+        """
+        清空庫存資料庫中所有現有項目 (將其封存)
+        """
+        if not self.notion or not self.inventory_database_id:
+            print("❌ Notion 或庫存資料庫 ID 未設定，無法清空")
+            return False
+
+        print(f"🧹 正在清空庫存資料庫: {self.inventory_database_id}")
+        try:
+            import httpx
+            url = f"https://api.notion.com/v1/databases/{self.inventory_database_id}/query"
+            headers = {
+                "Authorization": f"Bearer {self.token}",
+                "Notion-Version": "2022-06-28",
+                "Content-Type": "application/json"
+            }
+            
+            all_pages = []
+            has_more = True
+            start_cursor = None
+            
+            while has_more:
+                payload = {}
+                if start_cursor:
+                    payload["start_cursor"] = start_cursor
+                
+                with httpx.Client() as client:
+                    resp = client.post(url, headers=headers, json=payload)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    all_pages.extend(data.get("results", []))
+                    has_more = data.get("has_more", False)
+                    start_cursor = data.get("next_cursor")
+
+            for page in all_pages:
+                page_id = page["id"]
+                self.notion.pages.update(page_id=page_id, archived=True)
+            
+            print(f"✅ 已清空 {len(all_pages)} 個項目")
+            return True
+        except Exception as e:
+            print(f"❌ 清空資料庫失敗: {e}")
+            return False
+
     def _get_now_iso(self):
         from datetime import datetime, timezone, timedelta
         # 轉換為台灣時間 (UTC+8)

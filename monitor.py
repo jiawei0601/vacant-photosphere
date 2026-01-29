@@ -27,6 +27,7 @@ class MarketMonitor:
         self.last_daily_report_date = None
         self.last_order_stats_date = None
         self.last_check_time = 0
+        self.last_inventory_clear_time = 0 # 記錄上次清空庫存的時間
         self.taipei_tz = timezone(timedelta(hours=8))
 
     def _get_now_taipei(self):
@@ -292,6 +293,15 @@ class MarketMonitor:
             self.ocr = InventoryOCR()
         
         try:
+            # --- 新增：清空資料庫邏輯 ---
+            import time as py_time
+            now_unix = py_time.time()
+            # 如果距離上次清空超過 10 分鐘 (600秒)，執行清空
+            if now_unix - self.last_inventory_clear_time > 600:
+                print("🧹 偵測到新的一波庫存上傳，正在清空舊有資料...")
+                self.notion.clear_inventory_database()
+                self.last_inventory_clear_time = now_unix
+
             stocks = self.ocr.extract_stock_info(image_path)
             results = []
             for s in stocks:
@@ -308,7 +318,7 @@ class MarketMonitor:
                     "name": s['name'],
                     "quantity": s.get('quantity', 0),
                     "profit": s.get('profit', 0),
-                    "status": "成功" if success else "失敗"
+                    "status": "處理成功" if success else "處理失敗"
                 })
             return results
         except Exception as e:
