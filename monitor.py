@@ -325,7 +325,7 @@ class MarketMonitor:
             print(f"庫存回調執行失敗: {e}")
             return []
 
-    def get_ocr_usage_report(self):
+    async def get_ocr_usage_report(self):
         """獲取 OCR 使用量報告"""
         if self.ocr:
             return self.ocr.get_monthly_usage_report()
