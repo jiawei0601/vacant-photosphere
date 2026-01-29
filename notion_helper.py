@@ -121,18 +121,29 @@ class NotionHelper:
              target_date = f"{date_str}T00:00:00.000+08:00"
 
         try:
-            # 1. 查詢是否已存在
-            query = self.notion.databases.query(
-                database_id=self.inventory_database_id,
-                filter={
+            # 1. 查詢是否已存在 (手動 API 請求以避免函式庫版本問題)
+            import httpx
+            url = f"https://api.notion.com/v1/databases/{self.inventory_database_id}/query"
+            headers = {
+                "Authorization": f"Bearer {self.token}",
+                "Notion-Version": "2022-06-28",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "filter": {
                     "property": "代碼",
                     "rich_text": {"equals": symbol}
                 }
-            )
+            }
+            
+            with httpx.Client() as client:
+                resp = client.post(url, headers=headers, json=payload)
+                resp.raise_for_status()
+                query_result = resp.json()
 
-            if query.get("results"):
+            if query_result.get("results"):
                 # 已存在，更新日期或狀態
-                page_id = query["results"][0]["id"]
+                page_id = query_result["results"][0]["id"]
                 self.notion.pages.update(
                     page_id=page_id,
                     properties={
