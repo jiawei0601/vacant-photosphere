@@ -56,9 +56,9 @@ class PriceFetcher:
                     return fugle_data
 
             # 2. 如果富果未設定或失敗，嘗試 FinMind
-            # 取得最近幾天的資料以確保能拿到最後一筆成交價
+            # 取得最近幾天的資料以確保能拿到最後一筆成交價 (擴大到 14 天以應對長假)
             end_date = now.strftime("%Y-%m-%d")
-            start_date = (now - timedelta(days=5)).strftime("%Y-%m-%d")
+            start_date = (now - timedelta(days=14)).strftime("%Y-%m-%d")
             
             df = self.loader.taiwan_stock_daily(
                 stock_id=symbol,
@@ -71,7 +71,19 @@ class PriceFetcher:
                 if 'close' in df.columns:
                     non_nan_df = df.dropna(subset=['close'])
                     if not non_nan_df.empty:
-                        price = float(non_nan_df.iloc[-1]['close'])
+                        last_row = non_nan_df.iloc[-1]
+                        price = float(last_row['close'])
+                        date_str = str(last_row.get('date', ''))
+                        
+                        # 如果 FinMind 的最新日期不是今天，且現在是交易時間，嘗試用 yfinance 抓更即時的值
+                        today_str = now.strftime("%Y-%m-%d")
+                        if date_str != today_str and now.hour >= 9:
+                            print(f"[{symbol}] FinMind 資料僅更新至 {date_str}，嘗試使用 yfinance 獲取今日即時價...")
+                            yf_price = self._get_yfinance_price(symbol)
+                            if yf_price:
+                                price = yf_price
+                                date_str = today_str # 標記為今日
+
                         # 更新快取
                         self.price_cache[symbol] = {
                             "price": price,
@@ -81,14 +93,21 @@ class PriceFetcher:
                             "price": price,
                             "time": now.strftime("%H:%M:%S"),
                             "is_cached": False,
-                            "source": "FinMind"
+                            "source": "FinMind/yF"
                         }
-                
-                print(f"[{symbol}] 找不到有效的 'close' 欄位資料。")
-                return None
-            else:
-                print(f"[{symbol}] FinMind/Fugle 均未回傳資料。")
-                return None
+            
+            # 3. 最後備援：直接用 yfinance
+            yf_price = self._get_yfinance_price(symbol)
+            if yf_price:
+                return {
+                    "price": yf_price,
+                    "time": now.strftime("%H:%M:%S"),
+                    "is_cached": False,
+                    "source": "yfinance"
+                }
+
+            print(f"[{symbol}] 所有來源均未回傳資料。")
+            return None
         except KeyError as e:
             if str(e) == "'data'":
                 print(f"[{symbol}] 獲取失敗: API 回傳格式錯誤 (KeyError: 'data')。這通常是因為未設定 FINMIND_TOKEN 或已達 API 使用上限。")
@@ -124,6 +143,40 @@ class PriceFetcher:
             return None
         except Exception as e:
             print(f"[{symbol}] Fugle Snapshot 備援失敗: {e}")
+            return None
+
+    def _get_yfinance_price(self, symbol):
+        """
+        使用 yfinance 獲取即時價格備援
+        """
+        try:
+            # 轉換代碼: yfinance 需要 .TW (上市) 或 .TWO (上櫃)
+            # 這裡先簡單嘗試 .TW，如果失敗可再擴充
+            ticker_symbol = f"{symbol}.TW"
+            if len(symbol) == 4 and symbol.startswith('6'): # 簡略判定上櫃
+                ticker_symbol = f"{symbol}.TWO"
+                
+            ticker = yf.Ticker(ticker_symbol)
+            # 取得即時報價資訊
+            info = ticker.fast_info
+            if hasattr(info, 'last_price') and info.last_price:
+                return float(info.last_price)
+            
+            # 如果 fast_info 失敗，嘗試 history
+            hist = ticker.history(period="1d", interval="1m")
+            if not hist.empty:
+                return float(hist.iloc[-1]['Close'])
+            
+            # 如果還是失敗，嘗試不帶後綴 (如果是加權指數等)
+            if symbol == 'TAIEX':
+                ticker = yf.Ticker("^TWII")
+                hist = ticker.history(period="1d", interval="1m")
+                if not hist.empty:
+                    return float(hist.iloc[-1]['Close'])
+                    
+            return None
+        except Exception as e:
+            print(f"[{symbol}] yfinance 獲取失敗: {e}")
             return None
 
     def _get_fugle_historical(self, symbol, start_date, end_date):
