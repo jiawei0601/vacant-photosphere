@@ -1,7 +1,6 @@
-import re
-import os
-import json
 import io
+import cv2
+import numpy as np
 from google.cloud import vision
 from google.oauth2 import service_account
 
@@ -97,9 +96,10 @@ class InventoryOCR:
                     for paragraph in block.paragraphs:
                         # 獲取中心點座標
                         vertices = paragraph.bounding_box.vertices
+                        v_list = [{"x": v.x, "y": v.y} for v in vertices]
                         center_y = sum([v.y for v in vertices]) / len(vertices)
                         center_x = sum([v.x for v in vertices]) / len(vertices)
-
+                        
                         # 改進：文字塊之間必須保留空格，避免數字粘連
                         words_text = []
                         for word in paragraph.words:
@@ -112,13 +112,48 @@ class InventoryOCR:
                             extracted_items.append({
                                 "text": para_text.strip(),
                                 "x": center_x,
-                                "y": center_y
+                                "y": center_y,
+                                "vertices": v_list
                             })
 
             return extracted_items
         except Exception as e:
             print(f"Vision API Error: {e}")
             return []
+
+    def _get_color_sign(self, cv_img, vertices):
+        """
+        分析塊的顏色：紅色為正(1)，綠色為負(-1)，其餘為中性(0)
+        """
+        if cv_img is None: return 0
+        try:
+            min_x = int(min([v['x'] for v in vertices]))
+            max_x = int(max([v['x'] for v in vertices]))
+            min_y = int(min([v['y'] for v in vertices]))
+            max_y = int(max([v['y'] for v in vertices]))
+            
+            h, w = cv_img.shape[:2]
+            p = 1 # 邊距
+            roi = cv_img[max(0, min_y-p):min(h, max_y+p), max(0, min_x-p):min(w, max_x+p)]
+            if roi.size == 0: return 0
+            
+            hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+            # 紅色範圍
+            lower_red1, upper_red1 = np.array([0, 50, 50]), np.array([10, 255, 255])
+            lower_red2, upper_red2 = np.array([160, 50, 50]), np.array([180, 255, 255])
+            # 綠色範圍 (調廣一點以抓到深綠)
+            lower_green, upper_green = np.array([35, 40, 40]), np.array([90, 255, 255])
+            
+            mask_r = cv2.bitwise_or(cv2.inRange(hsv, lower_red1, upper_red1), cv2.inRange(hsv, lower_red2, upper_red2))
+            mask_g = cv2.inRange(hsv, lower_green, upper_green)
+            
+            r_pixels = cv2.countNonZero(mask_r)
+            g_pixels = cv2.countNonZero(mask_g)
+            
+            if r_pixels > g_pixels and r_pixels > 5: return 1
+            if g_pixels > r_pixels and g_pixels > 5: return -1
+        except: pass
+        return 0
 
     def extract_stock_info(self, image_path):
         """
@@ -127,6 +162,9 @@ class InventoryOCR:
         items = self.process_image(image_path)
         if not items:
             return []
+        
+        # 讀取圖片用於顏色分析
+        cv_img = cv2.imread(image_path)
 
         # 1. 根據 Y 座標分組
         items.sort(key=lambda i: i['y'])
@@ -186,61 +224,62 @@ class InventoryOCR:
             name = name.lstrip('|').lstrip('【').strip()
 
             # --- 超強力提取純數字數據 ---
-            data_numbers = []
+            data_candidates = []
             for it in row:
-                # 嚴格限制在代碼右側或同塊中代碼之後的內容
-                if it['x'] > s_item['x'] - 2:
+                if it['x'] > s_item['x'] - 5:
                     txt = it['text'].upper().replace(',', '').strip()
-                    # 移除代碼干擾
                     if symbol in txt:
-                        parts = txt.split(symbol)
-                        text_to_scan = " ".join(parts)
+                        scan_text = txt.split(symbol, 1)[-1]
                     else:
-                        text_to_scan = txt
+                        scan_text = txt
                         
-                    # 尋找所有數字 (含負號)
-                    nums = re.findall(r'-?\d+\.?\d*', text_to_scan)
-                    for n in nums:
+                    raw_nums = re.findall(r'-?\d+\.?\d*', scan_text)
+                    for n in raw_nums:
                         try:
                             f_n = float(n)
-                            # 排除純代碼
                             if f_n == float(symbol) and len(n) == len(symbol):
                                 continue
-                            data_numbers.append(f_n)
+                            # 獲取該數字的顏色屬性
+                            c_sign = self._get_color_sign(cv_img, it.get('vertices', []))
+                            data_candidates.append({"val": f_n, "color": c_sign})
                         except: continue
 
             quantity = 0
             avg_price = 0.0
             profit = 0
 
-            # 針對收集到的數字列表 [已排序] 進行智慧分配
-            if len(data_numbers) >= 2:
-                # 1. 損益：通常在最右邊 (最後一個數字)
-                # 如果最後一個是整數，高度機率是損益
-                if data_numbers[-1] == int(data_numbers[-1]):
-                    profit = int(data_numbers[-1])
-                    remaining_nums = data_numbers[:-1]
+            if len(data_candidates) >= 2:
+                # 1. 損益：通常在最右邊
+                c_profit = data_candidates[-1]
+                if c_profit['val'] == int(c_profit['val']) or len(data_candidates) == 2:
+                    profit = int(c_profit['val'])
+                    # 顏色套用點：損益欄位
+                    if c_profit['color'] == -1: profit = -abs(profit)
+                    if c_profit['color'] == 1: profit = abs(profit)
+                    rem_candidates = data_candidates[:-1]
                 else:
-                    # 如果最後一個不是整數(可能是均價)，損益在倒數第二個
-                    profit = int(data_numbers[-2]) if len(data_numbers) > 2 else 0
-                    remaining_nums = data_numbers[:-2]
+                    c_profit = data_candidates[-2]
+                    profit = int(c_profit['val'])
+                    if c_profit['color'] == -1: profit = -abs(profit)
+                    if c_profit['color'] == 1: profit = abs(profit)
+                    rem_candidates = data_candidates[:-2]
 
-                # 2. 數量：在剩下的數字中，第一個整數通常是數量
-                for n in remaining_nums:
+                # 2. 數量
+                for c in rem_candidates:
+                    n = c['val']
                     if n == int(n) and n > 0:
-                        quantity = int(n)
-                        # 特殊修正：如果數量跟代碼一樣且後面還有數字，再往下找
-                        if quantity == float(symbol) and len(remaining_nums) > 1:
+                        if n == float(symbol) and len(rem_candidates) > 1:
                             continue
+                        quantity = int(n)
                         break
                 
-                # 3. 均價：剩餘數字中，最像價格的 (有小數或在 quantity 附近的)
-                for n in remaining_nums:
-                    if (n != quantity) and 0 < n < 5000:
+                # 3. 均價
+                for c in data_candidates:
+                    n = c['val']
+                    if n != quantity and abs(n - profit) > 0.01 and 0 < n < 10000:
                         avg_price = n
-                        if n != int(n): break # 優先選帶小數的
+                        if n != int(n): break
 
-            # 特殊邏輯：針對只有兩個數字的情況 (數量 + 損益)
             elif len(data_numbers) == 1:
                 quantity = int(data_numbers[0])
 
