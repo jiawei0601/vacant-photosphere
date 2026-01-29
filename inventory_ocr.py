@@ -161,9 +161,11 @@ class InventoryOCR:
 
             # 找到代碼所在的 Item 及其索引
             s_idx = -1
+            s_item = None
             for i, it in enumerate(row):
                 if symbol in it['text'].upper():
                     s_idx = i
+                    s_item = it
                     break
             
             if s_idx == -1: continue
@@ -233,14 +235,6 @@ class InventoryOCR:
                     if n == int(n) and n != quantity:
                         profit = int(n)
                         break
-
-            results.append({
-                "symbol": symbol,
-                "name": name if name else "未知標的",
-                "quantity": abs(quantity),
-                "avg_price": avg_price,
-                "profit": profit
-            })
 
             results.append({
                 "symbol": symbol,
