@@ -504,8 +504,10 @@ class MarketMonitor:
                     import time as py_time
                     current_unix = py_time.time()
                     if current_unix - self.last_check_time >= self.interval:
-                        await self.check_once()
+                        success, fail = await self.check_once()
                         self.last_check_time = current_unix
+                        # 自動檢查完成後發送訊息
+                        await self.notifier.send_message(f"✅ 定期價格檢查完成。成功: {success}, 失敗: {fail}")
                 else:
                     # 非開盤時間不需要執行 check_once，除非環境變數有開
                     pass
