@@ -25,6 +25,12 @@ class PriceFetcher:
         self.price_cache = {} # 格式: {symbol: {"price": float, "time": datetime, "full_stats": dict}}
         self.cache_duration = int(os.getenv("CACHE_DURATION_SECONDS", 300))
 
+    def _get_taipei_now(self):
+        """獲取台北時區的當前時間"""
+        from datetime import datetime, timezone, timedelta
+        tz = timezone(timedelta(hours=8))
+        return datetime.now(tz)
+
     def get_last_price(self, symbol):
         """
         獲取股票或權證的最新成交價 (支援快取)
@@ -33,10 +39,10 @@ class PriceFetcher:
         from datetime import datetime, timedelta
         
         # 檢查快取
-        now = datetime.now()
+        now = self._get_taipei_now()
         if symbol in self.price_cache:
             cache_data = self.price_cache[symbol]
-            if now - cache_data['time'] < timedelta(seconds=self.cache_duration):
+            if now.replace(tzinfo=None) - cache_data['time'].replace(tzinfo=None) < timedelta(seconds=self.cache_duration):
                 return {
                     "price": cache_data['price'],
                     "time": cache_data['time'].strftime("%H:%M:%S"),
@@ -106,7 +112,7 @@ class PriceFetcher:
                     "source": "yfinance"
                 }
 
-            print(f"[{symbol}] 所有來源均未回傳資料。")
+            print(f"[{symbol}] 所有來源與備援 yfinance 均未回傳資料。")
             return None
         except KeyError as e:
             if str(e) == "'data'":
@@ -285,9 +291,10 @@ class PriceFetcher:
         """
         try:
             from datetime import datetime, timedelta
+            now = self._get_taipei_now()
             # 獲取約 60 天的資料以確保計算出 MA20
-            end_date_str = datetime.now().strftime("%Y-%m-%d")
-            start_date_str = (datetime.now() - timedelta(days=65)).strftime("%Y-%m-%d")
+            end_date_str = now.strftime("%Y-%m-%d")
+            start_date_str = (now - timedelta(days=65)).strftime("%Y-%m-%d")
             
             # 1. 優先嘗試富果
             df = None
@@ -324,12 +331,12 @@ class PriceFetcher:
                 last_row = df.iloc[idx]
                 
                 date_str = str(last_row.get('date', '未知日期'))
-                today_str = datetime.now().strftime("%Y-%m-%d")
+                today_str = now.strftime("%Y-%m-%d")
                 
                 # --- [核心改進] 確保 offset=0 時拿到的是今天最新的資料 ---
-                # 如果 offset 是 0 且資料日期不是今天，且現在已過開盤時間 (09:00)
-                if offset == 0 and date_str != today_str and datetime.now().hour >= 9:
-                    print(f"[{symbol}] 資料僅更新至 {date_str}，嘗試以 SnapShot 補齊今日數據...")
+                # 如果 offset 是 0 且資料日期不是今天，且現在已過台北開盤時間 (09:00)
+                if offset == 0 and date_str != today_str and now.hour >= 9:
+                    print(f"[{symbol}] 資料日期 {date_str} 非今日 {today_str}，啟動 SnapShot 補齊數據...")
                     latest = self.get_last_price(symbol)
                     if latest:
                         # 建立一個補丁行
