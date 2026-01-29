@@ -315,6 +315,12 @@ class MarketMonitor:
             print(f"庫存回調執行失敗: {e}")
             return []
 
+    def get_ocr_usage_report(self):
+        """獲取 OCR 使用量報告"""
+        if self.ocr:
+            return self.ocr.get_monthly_usage_report()
+        return "⚠️ OCR 引擎尚未啟動"
+
     async def get_monitoring_limits_callback(self):
         """獲取目前監控清單與警戒上下限摘要"""
         items = self.notion.get_monitoring_list()
@@ -474,6 +480,7 @@ class MarketMonitor:
         self.notifier.set_stock_chart_callback(self.get_stock_chart_callback)
         self.notifier.set_monitoring_list_callback(self.get_monitoring_limits_callback)
         self.notifier.set_inventory_callback(self.inventory_callback)
+        self.notifier.set_ocr_usage_callback(self.get_ocr_usage_report)
         
         # 獲取 Telegram Application
         app = self.notifier.app

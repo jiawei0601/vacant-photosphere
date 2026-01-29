@@ -48,6 +48,7 @@ class Notifier:
             self.stock_chart_callback = None # New callback
             self.monitoring_list_callback = None # New callback
             self.inventory_callback = None # New callback for OCR
+            self.ocr_usage_callback = None # New callback for OCR usage
 
     async def _debug_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
@@ -311,6 +312,11 @@ class Notifier:
                 fugle_status = "✅ 已設定" if fugle_key else "❌ 未設定"
                 msg += f"\n\n🛠️ **備援系統**\n• 富果 Fugle API: {fugle_status}"
                 
+                # 增加 OCR 使用量顯示
+                if self.ocr_usage_callback:
+                    ocr_usage = await self.ocr_usage_callback()
+                    msg += f"\n\n{ocr_usage}"
+                
                 await update.message.reply_text(msg, parse_mode='Markdown')
         except Exception as e:
             await update.message.reply_text(f"❌ 查詢時發生錯誤: {e}")
@@ -472,6 +478,12 @@ class Notifier:
                 summary = "✅ **庫存更新結果**\n\n"
                 for s in results:
                     summary += f"• {s['name']} ({s['symbol']}) - {s['status']}\n"
+                
+                # 額外附上使用量報告
+                if self.ocr_usage_callback:
+                    usage_msg = await self.ocr_usage_callback()
+                    summary += f"\n---\n{usage_msg}"
+                
                 await update.message.reply_text(summary, parse_mode='Markdown')
             
             # 刪除暫存檔

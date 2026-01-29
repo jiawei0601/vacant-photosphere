@@ -9,9 +9,8 @@ class InventoryOCR:
     def __init__(self):
         """
         初始化 Google Cloud Vision OCR 讀取器
-        需設定環境變數 GOOGLE_SERVICE_ACCOUNT_JSON (JSON 內容) 
-        或 GOOGLE_APPLICATION_CREDENTIALS (檔案路徑)
         """
+        self.usage_file = "vision_usage.json"
         self.client = self._init_client()
 
     def _init_client(self):
@@ -35,6 +34,42 @@ class InventoryOCR:
         print("⚠️ 警告: 未找到 Google Cloud 認證資訊，OCR 功能將無法運作。")
         return None
 
+    def _get_usage(self):
+        """讀取本月使用量"""
+        from datetime import datetime
+        month_key = datetime.now().strftime("%Y-%m")
+        if os.path.exists(self.usage_file):
+            try:
+                with open(self.usage_file, 'r') as f:
+                    data = json.load(f)
+                    if data.get("month") == month_key:
+                        return data.get("count", 0)
+            except:
+                pass
+        return 0
+
+    def _increment_usage(self):
+        """增加使用量計數"""
+        from datetime import datetime
+        month_key = datetime.now().strftime("%Y-%m")
+        current_count = self._get_usage() + 1
+        with open(self.usage_file, 'w') as f:
+            json.dump({"month": month_key, "count": current_count}, f)
+        return current_count
+
+    def get_monthly_usage_report(self):
+        """獲取使用量報告字串"""
+        count = self._get_usage()
+        # Google Vision 免費額度為 1,000 次/月
+        free_limit = 1000
+        remaining = max(0, free_limit - count)
+        return (
+            f"📊 **Vision API 本月使用量**\n"
+            f"• 本次辨識後累計: `{count}` 次\n"
+            f"• 剩餘免費額度: `{remaining}` 次\n"
+            f"(註: 此計數在重新部署時會歸零)"
+        )
+
     def process_image(self, image_path):
         """
         處理圖片並提取文字區塊及其座標
@@ -49,6 +84,9 @@ class InventoryOCR:
             image = vision.Image(content=content)
             response = self.client.document_text_detection(image=image)
             full_text_obj = response.full_text_annotation
+
+            # 增加使用量計數
+            self._increment_usage()
 
             if response.error.message or not full_text_obj:
                 return []
