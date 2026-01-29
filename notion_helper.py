@@ -108,9 +108,12 @@ class NotionHelper:
         """
         更新或新增庫存資料庫項
         """
-        if not self.notion or not self.inventory_database_id:
-            print("Notion 或庫存資料庫 ID 未設定")
-            return
+        if not self.notion:
+            print("❌ Notion Client 未初始化")
+            return False
+        if not self.inventory_database_id:
+            print("⚠️ 警告: INVENTORY_DATABASE_ID 未設定，跳過庫存更新")
+            return False
 
         target_date = date_str if date_str else self._get_now_iso()
         # 如果傳入的是 YYYY-MM-DD，轉成 ISO 格式
@@ -137,7 +140,7 @@ class NotionHelper:
                         "狀態": {"status": {"name": "庫存中"}}
                     }
                 )
-                print(f"更新庫存: {name} ({symbol})")
+                print(f"✅ 更新庫存成功: {name} ({symbol})")
             else:
                 # 不存在，新增
                 self.notion.pages.create(
@@ -149,10 +152,10 @@ class NotionHelper:
                         "狀態": {"status": {"name": "庫存中"}}
                     }
                 )
-                print(f"新增庫存: {name} ({symbol})")
+                print(f"✅ 新增庫存成功: {name} ({symbol})")
             return True
         except Exception as e:
-            print(f"操作 Notion 庫存資料庫時發生錯誤: {e}")
+            print(f"❌ 操作 Notion 庫存資料庫時發生錯誤 ({symbol}): {e}")
             return False
 
     def update_alert_prices(self, page_id, high_alert=None, low_alert=None):
