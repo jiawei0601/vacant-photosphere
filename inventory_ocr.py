@@ -53,27 +53,32 @@ class InventoryOCR:
                 content = image_file.read()
 
             image = vision.Image(content=content)
-            # 執行文字辨識 (支援繁體中文)
-            response = self.client.text_detection(image=image)
-            texts = response.text_annotations
+            # 使用 document_text_detection 處理密集的表格文字
+            response = self.client.document_text_detection(image=image)
+            full_text_obj = response.full_text_annotation
 
             if response.error.message:
                 raise Exception(f"{response.error.message}")
 
-            if not texts:
+            if not full_text_obj:
                 return []
 
-            # 第 0 個元素是完整文字區塊，後續是個別行/單字
             extracted_text = []
-            # 跳過第一個 (全選區塊)，從索引 1 開始獲取個別偵測到的文字
-            for annotation in texts[1:]:
-                extracted_text.append({
-                    "text": annotation.description.strip(),
-                    # Google Vision 不直接提供類似 EasyOCR 的 per-word prob，通常精準度很高
-                    "confidence": 1.0, 
-                    # 邊界框 (Vertices)
-                    "bbox": [(v.x, v.y) for v in annotation.bounding_poly.vertices]
-                })
+            # 從全文結構中提取區塊，Google 會自動幫我們排好順序
+            for page in full_text_obj.pages:
+                for block in page.blocks:
+                    for paragraph in block.paragraphs:
+                        para_text = ""
+                        for word in paragraph.words:
+                            word_text = "".join([symbol.text for symbol in word.symbols])
+                            para_text += word_text
+                        
+                        if para_text:
+                            extracted_text.append({
+                                "text": para_text.strip(),
+                                "confidence": 1.0,
+                                "bbox": [] # document 模式的 bbox 結構較複雜，暫不傳回
+                            })
 
             return extracted_text
 
