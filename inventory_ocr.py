@@ -185,62 +185,64 @@ class InventoryOCR:
             name = re.sub(r'(現股|現 股|融資|融券|代銷)', '', name).strip()
             name = name.lstrip('|').lstrip('【').strip()
 
-            # --- 關鍵：提取純數字數據，嚴格限制在代碼右側 ---
+            # --- 超強力提取純數字數據 ---
             data_numbers = []
             for it in row:
-                # 僅處理位於代碼右側的數字塊
-                if it['x'] > s_item['x'] - 5:
+                # 嚴格限制在代碼右側或同塊中代碼之後的內容
+                if it['x'] > s_item['x'] - 2:
                     txt = it['text'].upper().replace(',', '').strip()
-                    
-                    # 處理代碼粘連
+                    # 移除代碼干擾
                     if symbol in txt:
-                        # 拆分並過濾掉代碼本身
                         parts = txt.split(symbol)
-                        for p in parts:
-                            if p:
-                                nums = re.findall(r'-?\d+\.?\d*', p)
-                                for n in nums:
-                                    try: data_numbers.append(float(n))
-                                    except: continue
+                        text_to_scan = " ".join(parts)
                     else:
-                        # 正常數字塊
-                        nums = re.findall(r'-?\d+\.?\d*', txt)
-                        for n in nums:
-                            try:
-                                # 💡 重要修正：排除任何與代碼相同的數字 (即便在括號內)
-                                if n == float(symbol):
-                                    continue
-                                data_numbers.append(float(n))
-                            except: continue
+                        text_to_scan = txt
+                        
+                    # 尋找所有數字 (含負號)
+                    nums = re.findall(r'-?\d+\.?\d*', text_to_scan)
+                    for n in nums:
+                        try:
+                            f_n = float(n)
+                            # 排除純代碼
+                            if f_n == float(symbol) and len(n) == len(symbol):
+                                continue
+                            data_numbers.append(f_n)
+                        except: continue
 
             quantity = 0
             avg_price = 0.0
             profit = 0
 
-            # 針對代碼右側的數字進行精準分配
-            if len(data_numbers) >= 1:
-                # 1. 數量：取右側第一個整數，且排除掉可能再次誤抓的代碼
-                for n in data_numbers:
+            # 針對收集到的數字列表 [已排序] 進行智慧分配
+            if len(data_numbers) >= 2:
+                # 1. 損益：通常在最右邊 (最後一個數字)
+                # 如果最後一個是整數，高度機率是損益
+                if data_numbers[-1] == int(data_numbers[-1]):
+                    profit = int(data_numbers[-1])
+                    remaining_nums = data_numbers[:-1]
+                else:
+                    # 如果最後一個不是整數(可能是均價)，損益在倒數第二個
+                    profit = int(data_numbers[-2]) if len(data_numbers) > 2 else 0
+                    remaining_nums = data_numbers[:-2]
+
+                # 2. 數量：在剩下的數字中，第一個整數通常是數量
+                for n in remaining_nums:
                     if n == int(n) and n > 0:
-                        # 如果第一個數字還是跟代碼一樣 (且代碼長度為4)，極端可能是誤抓，通常數量會跟代碼不同
-                        if n == float(symbol) and len(symbol) == 4 and len(data_numbers) > 1:
-                            continue
                         quantity = int(n)
+                        # 特殊修正：如果數量跟代碼一樣且後面還有數字，再往下找
+                        if quantity == float(symbol) and len(remaining_nums) > 1:
+                            continue
                         break
                 
-                # 2. 均價：取帶有小數或合理的價格區間
-                for n in reversed(data_numbers):
-                    if 0 < n < 5000 and n != quantity:
-                        # 優先取有小數點的
-                        if n != int(n) or avg_price == 0:
-                            avg_price = n
-                            if n != int(n): break 
+                # 3. 均價：剩餘數字中，最像價格的 (有小數或在 quantity 附近的)
+                for n in remaining_nums:
+                    if (n != quantity) and 0 < n < 5000:
+                        avg_price = n
+                        if n != int(n): break # 優先選帶小數的
 
-                # 3. 損益：取整行最後一個整數 (損益通常在最右邊)
-                for n in reversed(data_numbers):
-                    if n == int(n) and n != quantity:
-                        profit = int(n)
-                        break
+            # 特殊邏輯：針對只有兩個數字的情況 (數量 + 損益)
+            elif len(data_numbers) == 1:
+                quantity = int(data_numbers[0])
 
             results.append({
                 "symbol": symbol,
