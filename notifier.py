@@ -481,7 +481,9 @@ class Notifier:
             else:
                 summary = "✅ **庫存更新結果**\n\n"
                 for s in results:
-                    summary += f"• {s['name']} ({s['symbol']}) - {s['status']}\n"
+                    # 清理名稱中的 Markdown 特殊字元避免 Telegram 報錯
+                    safe_name = s['name'].replace('*', '\\*').replace('_', '\\_').replace('`', '\\`')
+                    summary += f"• {safe_name} ({s['symbol']}) - {s['status']}\n"
                 
                 # 額外附上使用量報告
                 if self.ocr_usage_callback:

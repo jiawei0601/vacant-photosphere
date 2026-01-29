@@ -180,18 +180,21 @@ class InventoryOCR:
                     if any('\u4e00' <= char <= '\u9fff' for char in txt):
                         raw_name += txt
             
-            # 清理名稱：移除掉尾部可能殘留的數字（通常是權證名稱自帶的數字，不是數據）
-            name = re.sub(r'(現股|融資|融券|代銷)', '', raw_name).strip()
+            # 清理名稱：移除掉開頭與尾部可能殘留的數字與雜質
+            name = re.sub(r'^[|\[【\s]*', '', raw_name) # 移除左側符號
+            name = re.sub(r'(現股|現 股|融資|融券|代銷)', '', name).strip()
+            name = name.lstrip('|').lstrip('【').strip()
 
             # --- 關鍵：提取純數字數據，嚴格限制在代碼右側 ---
             data_numbers = []
             for it in row:
-                # 僅處理位於代碼右側的數字塊，避免抓到名稱裡的數字 (如 56購01)
+                # 僅處理位於代碼右側的數字塊
                 if it['x'] > s_item['x'] - 5:
                     txt = it['text'].upper().replace(',', '').strip()
                     
                     # 處理代碼粘連
-                    if symbol in txt and len(txt) > len(symbol):
+                    if symbol in txt:
+                        # 拆分並過濾掉代碼本身
                         parts = txt.split(symbol)
                         for p in parts:
                             if p:
@@ -204,8 +207,8 @@ class InventoryOCR:
                         nums = re.findall(r'-?\d+\.?\d*', txt)
                         for n in nums:
                             try:
-                                # 排除掉純代碼
-                                if n == float(symbol) and len(txt) == len(symbol):
+                                # 💡 重要修正：排除任何與代碼相同的數字 (即便在括號內)
+                                if n == float(symbol):
                                     continue
                                 data_numbers.append(float(n))
                             except: continue
@@ -216,9 +219,12 @@ class InventoryOCR:
 
             # 針對代碼右側的數字進行精準分配
             if len(data_numbers) >= 1:
-                # 1. 數量：取右側第一個整數
+                # 1. 數量：取右側第一個整數，且排除掉可能再次誤抓的代碼
                 for n in data_numbers:
                     if n == int(n) and n > 0:
+                        # 如果第一個數字還是跟代碼一樣 (且代碼長度為4)，極端可能是誤抓，通常數量會跟代碼不同
+                        if n == float(symbol) and len(symbol) == 4 and len(data_numbers) > 1:
+                            continue
                         quantity = int(n)
                         break
                 
