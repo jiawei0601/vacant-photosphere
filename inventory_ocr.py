@@ -157,131 +157,111 @@ class InventoryOCR:
 
     def extract_stock_info(self, image_path):
         """
-        精準提取表格各欄位數據
+        使用精準座標定位方式進行 OCR 辨識
         """
+        import re
         items = self.process_image(image_path)
         if not items:
             return []
         
-        # 讀取圖片用於顏色分析
         cv_img = cv2.imread(image_path)
-
-        # 1. 根據 Y 座標分組
+        
+        # 1. 根據 Y 座標將資料分行 (容許 15 像素誤差)
         items.sort(key=lambda i: i['y'])
         rows = []
         if items:
             current_row = [items[0]]
             for i in range(1, len(items)):
-                if abs(items[i]['y'] - current_row[-1]['y']) < 25: 
+                if abs(items[i]['y'] - current_row[0]['y']) < 15:
                     current_row.append(items[i])
                 else:
                     rows.append(sorted(current_row, key=lambda r: r['x']))
                     current_row = [items[i]]
             rows.append(sorted(current_row, key=lambda r: r['x']))
 
-        results = []
-        # 精確匹配 4 位數字股票或 6 位數字權證
-        symbol_pattern = re.compile(r'\b(\d{4}|\d{6})\b')
+        # 2. 偵測表頭 X 座標定位點 (Anchor)
+        anchors = {
+            "symbol": None,
+            "quantity": None,
+            "profit": None,
+            "price": None
+        }
         
+        # 遍歷前幾行尋找表頭
+        for row in rows[:5]:
+            for it in row:
+                txt = it['text']
+                if "代碼" in txt or "名稱" in txt: anchors["symbol"] = it['x']
+                if "即時庫存" in txt or "庫存" in txt: anchors["quantity"] = it['x']
+                if "損益" in txt: anchors["profit"] = it['x']
+                if "付出成本" in txt or "成本均價" in txt or "均價" in txt: anchors["price"] = it['x']
+
+        # 如果沒找到表頭，設定預設權重位置 (根據常見比例)
+        print(f"📍 偵測到表頭定位: {anchors}")
+
+        results = []
+        symbol_pattern = re.compile(r'\b(\d{4}|\d{6})\b')
+
         for row in rows:
             row_str = " ".join([it['text'] for it in row]).upper()
-            # 找到所有可能的代碼候選
             symbols = symbol_pattern.findall(row_str)
             if not symbols: continue
-
-            # 優先取 6 位 (權證)，其次取 4 位，且排除掉明顯是時間或長流水號的片段
-            symbol = ""
-            for s in symbols:
-                if len(s) == 6 or len(s) == 4:
-                    symbol = s
-                    break
-            if not symbol: continue
-
-            # 找到代碼所在的 Item 及其索引
-            s_idx = -1
-            s_item = None
-            for i, it in enumerate(row):
-                if symbol in it['text'].upper():
-                    s_idx = i
-                    s_item = it
-                    break
             
-            if s_idx == -1: continue
+            # 找到代碼與其 Item
+            symbol = symbols[0] # 取第一個找到的
+            s_item = next((it for it in row if symbol in it['text']), None)
+            if not s_item: continue
 
-            # 提取名稱：略過交易類型字詞，且只看代碼左側或同塊
-            raw_name = ""
+            # 提取名稱：尋找代碼左側或鄰近的中文塊
+            name = ""
             for it in row:
-                if it['x'] <= s_item['x'] + 10: # 包含代碼同塊
-                    txt = it['text'].replace(symbol, '').strip()
-                    # 移除純數字或常見類別字
-                    txt = re.sub(r'^(現股|融資|融券|代銷|資|券)$', '', txt)
-                    if any('\u4e00' <= char <= '\u9fff' for char in txt):
-                        raw_name += txt
+                if it['x'] < s_item['x'] + 50: # 代碼左側或同塊
+                    txt = re.sub(r'(現股|現\s?股|融資|融券|代銷|[0-9])', '', it['text'])
+                    txt = re.sub(r'[^\u4e00-\u9fff]', '', txt)
+                    if txt: name += txt
             
-            # 清理名稱：移除掉開頭與尾部可能殘留的數字與雜質
-            name = re.sub(r'^[|\[【\s]*', '', raw_name) # 移除左側符號
-            name = re.sub(r'(現股|現 股|融資|融券|代銷)', '', name).strip()
-            name = name.lstrip('|').lstrip('【').strip()
-
-            # --- 超強力提取純數字數據 ---
-            data_candidates = []
+            # --- 投影定位取值 ---
+            # 我們將行內所有數字及其 X 座標拿出來
+            val_candidates = []
             for it in row:
-                if it['x'] > s_item['x'] - 5:
-                    txt = it['text'].upper().replace(',', '').strip()
-                    if symbol in txt:
-                        scan_text = txt.split(symbol, 1)[-1]
-                    else:
-                        scan_text = txt
-                        
-                    raw_nums = re.findall(r'-?\d+\.?\d*', scan_text)
-                    for n in raw_nums:
-                        try:
-                            f_n = float(n)
-                            if f_n == float(symbol) and len(n) == len(symbol):
-                                continue
-                            # 獲取該數字的顏色屬性
-                            c_sign = self._get_color_sign(cv_img, it.get('vertices', []))
-                            data_candidates.append({"val": f_n, "color": c_sign})
-                        except: continue
+                # 尋找數字塊
+                nums = re.findall(r'-?\d+\.?\d*', it['text'].replace(',', ''))
+                for n in nums:
+                    try:
+                        f_v = float(n)
+                        if f_v == float(symbol) and len(n) == len(symbol): continue
+                        val_candidates.append({
+                            "val": f_v,
+                            "x": it['x'],
+                            "vertices": it.get('vertices', [])
+                        })
+                    except: continue
 
             quantity = 0
-            avg_price = 0.0
             profit = 0
+            avg_price = 0.0
 
-            if len(data_candidates) >= 2:
-                # 1. 損益：通常在最右邊
-                c_profit = data_candidates[-1]
-                if c_profit['val'] == int(c_profit['val']) or len(data_candidates) == 2:
-                    profit = int(c_profit['val'])
-                    # 顏色套用點：損益欄位
-                    if c_profit['color'] == -1: profit = -abs(profit)
-                    if c_profit['color'] == 1: profit = abs(profit)
-                    rem_candidates = data_candidates[:-1]
-                else:
-                    c_profit = data_candidates[-2]
-                    profit = int(c_profit['val'])
-                    if c_profit['color'] == -1: profit = -abs(profit)
-                    if c_profit['color'] == 1: profit = abs(profit)
-                    rem_candidates = data_candidates[:-2]
+            # 根據與 Anchor 的距離分配數值
+            if anchors["quantity"] is not None:
+                match = min(val_candidates, key=lambda c: abs(c['x'] - anchors["quantity"]), default=None)
+                if match: quantity = int(match['val'])
 
-                # 2. 數量
-                for c in rem_candidates:
-                    n = c['val']
-                    if n == int(n) and n > 0:
-                        if n == float(symbol) and len(rem_candidates) > 1:
-                            continue
-                        quantity = int(n)
-                        break
-                
-                # 3. 均價
-                for c in data_candidates:
-                    n = c['val']
-                    if n != quantity and abs(n - profit) > 0.01 and 0 < n < 10000:
-                        avg_price = n
-                        if n != int(n): break
+            if anchors["profit"] is not None:
+                match = min(val_candidates, key=lambda c: abs(c['x'] - anchors["profit"]), default=None)
+                if match: 
+                    profit = int(match['val'])
+                    # 色彩修正
+                    c_sign = self._get_color_sign(cv_img, match['vertices'])
+                    if c_sign == -1: profit = -abs(profit)
+                    if c_sign == 1: profit = abs(profit)
 
-            elif len(data_numbers) == 1:
-                quantity = int(data_numbers[0])
+            if anchors["price"] is not None:
+                match = min(val_candidates, key=lambda c: abs(c['x'] - anchors["price"]), default=None)
+                if match: avg_price = match['val']
+
+            # 備援邏輯：如果沒表頭或沒勾到，用舊的排序邏輯 (略)
+            if not quantity and val_candidates:
+                 quantity = int(val_candidates[0]['val'])
 
             results.append({
                 "symbol": symbol,
