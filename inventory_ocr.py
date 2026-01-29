@@ -142,44 +142,60 @@ class InventoryOCR:
             rows.append(sorted(current_row, key=lambda r: r['x']))
 
         results = []
-        symbol_pattern = re.compile(r'(\d{4,6}[A-Z]?)')
+        # 精確匹配 4 位數字股票或 6 位數字權證
+        symbol_pattern = re.compile(r'\b(\d{4}|\d{6})\b')
         
         for row in rows:
-            # 將整行的文字串接起來進行搜尋
             row_str = " ".join([it['text'] for it in row]).upper()
-            match = symbol_pattern.search(row_str)
-            if not match: continue
+            # 找到所有可能的代碼候選
+            symbols = symbol_pattern.findall(row_str)
+            if not symbols: continue
 
-            symbol = match.group(1)
-            
+            # 優先取 6 位 (權證)，其次取 4 位，且排除掉明顯是時間或長流水號的片段
+            symbol = ""
+            for s in symbols:
+                if len(s) == 6 or len(s) == 4:
+                    symbol = s
+                    break
+            if not symbol: continue
+
             # 找到代碼所在的 Item 及其索引
-            s_item = None
             s_idx = -1
             for i, it in enumerate(row):
                 if symbol in it['text'].upper():
-                    s_item = it
                     s_idx = i
                     break
             
             if s_idx == -1: continue
 
-            # 提取名稱：優先看代碼同塊或前一塊
-            name = ""
-            if any('\u4e00' <= char <= '\u9fff' for char in row[s_idx]['text']):
-                name = re.sub(r'[\d\w]', '', row[s_idx]['text']).strip()
-            if not name and s_idx > 0:
-                name = row[s_idx-1]['text']
-            name = re.sub(r'[^\u4e00-\u9fff\d\w\u5143\u592a\u5b9a\u5317]', '', name).strip() # 保留常見券商字
+            # 提取名稱：略過交易類型字詞 (如 現股, 融資, 融券)
+            raw_name = ""
+            # 優先找代碼前面的區塊
+            search_items = row[:s_idx+1]
+            for it in reversed(search_items):
+                txt = it['text']
+                # 過濾掉代碼本身與常見動作字
+                txt = txt.replace(symbol, '').strip()
+                clean_txt = re.sub(r'[^\u4e00-\u9fff\d\w]', '', txt)
+                # 略過純類別字
+                if clean_txt in ["現股", "融資", "融券", "代銷", "資", "券"]:
+                    continue
+                if any('\u4e00' <= char <= '\u9fff' for char in clean_txt):
+                    raw_name = clean_txt
+                    break
+            
+            name = re.sub(r'(現股|融資|融券|代銷)', '', raw_name).strip()
 
-            # --- 關鍵：提取代碼右側的純數字數據 ---
-            # 過濾掉代碼本身，僅保留代碼右側的數據塊
+            # --- 關鍵：提取純數字數據，並過濾掉流水號 ---
             data_numbers = []
             for it in row[s_idx:]:
-                # 排除代碼本身
                 txt = it['text'].upper().replace(symbol, '').replace(',', '').strip()
-                # 尋找所有數字格式 (含正負號與小數)
+                # 尋找所有數字
                 nums = re.findall(r'-?\d+\.?\d*', txt)
                 for n in nums:
+                    # 關鍵：流水號通常長度大於 8 位，我們要跳過這種數字
+                    if len(n.replace('.', '').replace('-', '')) >= 8:
+                        continue
                     try:
                         data_numbers.append(float(n))
                     except: continue
@@ -188,29 +204,31 @@ class InventoryOCR:
             avg_price = 0.0
             profit = 0
 
-            # 根據台股常見表格列順序推斷：
-            # [代碼/名稱] -> [即時庫存] -> [昨日餘額] -> [損益試算] -> ... -> [成本均價]
-            if len(data_numbers) >= 3:
-                # 1. 數量 (通常是代碼後第一個整數)
+            # 針對剩餘的數字進行欄位分配
+            # 順序通常為: [庫存數量] -> [昨日餘額 (略過)] -> [損益] -> ... -> [均價]
+            if len(data_numbers) >= 1:
+                # 1. 數量
                 quantity = int(data_numbers[0])
                 
-                # 2. 損益 (通常是第 3 個數字，且數值較大)
-                # 為了穩健，我們找第 2 或第 3 個整數
-                for n in data_numbers[1:4]:
-                    if n == int(n) and abs(n) > 1:
-                        profit = int(n)
+                # 2. 損益 (尋找第 2 或第 3 個整數，且排除掉與數量過於接近的小數字)
+                if len(data_numbers) >= 3:
+                    # 在中間區域找損益
+                    for n in data_numbers[1:4]:
+                        if n == int(n) and abs(n) > 0:
+                            profit = int(n)
                 
-                # 3. 均價 (通常是倒數第 2 或第 3 個，且通常帶小數或與現價接近)
-                # 我們從右側搜尋
+                # 3. 均價 (從最後面往前找，通常是帶有小數或價格合理的數值)
                 for n in reversed(data_numbers):
-                    if 0 < n < 10000 and n != quantity and n != profit:
-                        avg_price = n
-                        break
+                    if 0 < n < 5000: # 價格通常不會超過 5000
+                        # 避免均價抓到跟數量一樣的數字
+                        if n != quantity or data_numbers.count(n) > 1:
+                            avg_price = n
+                            break
 
             results.append({
                 "symbol": symbol,
-                "name": name if name else "未知名稱",
-                "quantity": abs(quantity), # 確保數量為正
+                "name": name if name else "未知標的",
+                "quantity": abs(quantity),
                 "avg_price": avg_price,
                 "profit": profit
             })
