@@ -321,9 +321,52 @@ class MarketMonitor:
                     "status": "處理成功" if success else "處理失敗"
                 })
             return results
+            return results
         except Exception as e:
             print(f"庫存回調執行失敗: {e}")
             return []
+
+    async def sync_fubon_inventory_callback(self):
+        """從富邦 API 同步庫存並更新 Notion"""
+        from fubon_helper import FubonHelper
+        fubon = FubonHelper()
+        
+        if not fubon.is_available():
+            return "❌ 系統環境未安裝 Fubon Neo SDK，無法執行 API 同步。\n請聯繫管理員安裝 SDK 並配置憑證。"
+            
+        print("🔄 啟動富邦 API 庫存同步...")
+        stocks = fubon.get_inventory()
+        
+        if not stocks:
+            return "❌ 無法從富邦拉取庫存。請檢查：\n1. API Key/Secret 是否正確\n2. 憑證檔案路徑是否正確\n3. 帳號密碼是否正確"
+            
+        # 清空舊資料
+        print("🧹 同步前清空舊有庫存資料...")
+        self.notion.clear_inventory_database()
+        self.last_inventory_clear_time = time.time()
+        
+        results = []
+        for s in stocks:
+            success = self.notion.upsert_inventory_item(
+                s['symbol'], 
+                s['name'], 
+                quantity=s['quantity'],
+                avg_price=s['avg_price'],
+                profit=s['profit']
+            )
+            results.append({
+                "symbol": s['symbol'],
+                "name": s['name'],
+                "status": "同步成功" if success else "同步失敗"
+            })
+            
+        fubon.logout()
+        
+        summary = "✅ **富邦 API 庫存同步結果**\n\n"
+        for r in results:
+            summary += f"• {r['name']} ({r['symbol']}) - {r['status']}\n"
+            
+        return summary
 
     async def get_ocr_usage_report(self):
         """獲取 OCR 使用量報告"""
@@ -491,6 +534,7 @@ class MarketMonitor:
         self.notifier.set_monitoring_list_callback(self.get_monitoring_limits_callback)
         self.notifier.set_inventory_callback(self.inventory_callback)
         self.notifier.set_ocr_usage_callback(self.get_ocr_usage_report)
+        self.notifier.set_fubon_sync_callback(self.sync_fubon_inventory_callback)
         
         # 獲取 Telegram Application
         app = self.notifier.app

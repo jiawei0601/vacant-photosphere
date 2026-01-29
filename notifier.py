@@ -32,6 +32,7 @@ class Notifier:
             self.app.add_handler(CommandHandler("check", self._check_command)) # New command
             self.app.add_handler(CommandHandler("apicheck", self._api_usage_command)) # New command
             self.app.add_handler(CommandHandler("test", self._test_command)) # New command for testing
+            self.app.add_handler(CommandHandler("sync", self._sync_command)) # New command
             self.app.add_handler(CommandHandler("help", self._help_command))
             from telegram.ext import MessageHandler, filters
             self.app.add_handler(MessageHandler(filters.PHOTO, self._photo_handler))
@@ -48,6 +49,7 @@ class Notifier:
             self.stock_chart_callback = None # New callback
             self.monitoring_list_callback = None # New callback
             self.inventory_callback = None # New callback for OCR
+            self.fubon_sync_callback = None # New callback for Fubon API Sync
             self.ocr_usage_callback = None # New callback for OCR usage
 
     async def _debug_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -68,7 +70,10 @@ class Notifier:
                 "• `/show` - 顯示目前所有監控中的標的報價清單\n"
                 "• `/showlist` - 顯示目前所有追蹤標的與警報上下限\n"
                 "• `/prev` - 顯示前一交易日的完整盤後總結報告\n"
+                "• `/sync` - **[New]** 從富邦 API 自動同步最新庫存 (需先配置)\n"
                 "• `/alist` - 顯示目前「已暫停警報」的標的清單\n\n"
+                "📷 **庫存更新**\n"
+                "• 直接傳送「庫存截圖」給機器人，系統會自動透過 OCR 解析並更新 Notion 資料庫。\n\n"
                 "⚙️ **警報管理**\n"
                 "• `/stop [代碼]` - 暫停特定標的的價格警報 (例如: `/stop 2330`)\n"
                 "• `/start [代碼]` - 恢復特定標的的價格警報\n\n"
@@ -156,6 +161,10 @@ class Notifier:
     def set_ocr_usage_callback(self, callback):
         """設定用於獲取 OCR 使用量的回呼函式"""
         self.ocr_usage_callback = callback
+
+    def set_fubon_sync_callback(self, callback):
+        """設定用於富邦 API 同步的回呼函式"""
+        self.fubon_sync_callback = callback
 
     async def _set_interval_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not context.args:
@@ -290,6 +299,16 @@ class Notifier:
         except Exception as e:
             await update.message.reply_text(f"❌ 執行檢查時發生錯誤: {e}")
             print(f"Error in _check_command: {e}")
+
+    async def _sync_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """處理 /sync 指令，觸發富邦 API 同步"""
+        if not self.fubon_sync_callback:
+            await update.message.reply_text("系統尚未設定富邦 API 同步功能。")
+            return
+            
+        await update.message.reply_text("🔄 正在從富邦證券 API 同步庫存資料，請稍候...")
+        result_msg = await self.fubon_sync_callback()
+        await update.message.reply_text(result_msg, parse_mode='Markdown')
 
     async def _api_usage_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.api_usage_callback:
