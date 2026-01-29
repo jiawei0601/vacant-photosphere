@@ -168,73 +168,79 @@ class InventoryOCR:
             
             if s_idx == -1: continue
 
-            # 提取名稱：略過交易類型字詞 (如 現股, 融資, 融券)
+            # 提取名稱：略過交易類型字詞，且只看代碼左側或同塊
             raw_name = ""
-            # 優先找代碼前面的區塊
-            search_items = row[:s_idx+1]
-            for it in reversed(search_items):
-                txt = it['text']
-                # 過濾掉代碼本身與常見動作字
-                txt = txt.replace(symbol, '').strip()
-                clean_txt = re.sub(r'[^\u4e00-\u9fff\d\w]', '', txt)
-                # 略過純類別字
-                if clean_txt in ["現股", "融資", "融券", "代銷", "資", "券"]:
-                    continue
-                if any('\u4e00' <= char <= '\u9fff' for char in clean_txt):
-                    raw_name = clean_txt
-                    break
+            for it in row:
+                if it['x'] <= s_item['x'] + 10: # 包含代碼同塊
+                    txt = it['text'].replace(symbol, '').strip()
+                    # 移除純數字或常見類別字
+                    txt = re.sub(r'^(現股|融資|融券|代銷|資|券)$', '', txt)
+                    if any('\u4e00' <= char <= '\u9fff' for char in txt):
+                        raw_name += txt
             
+            # 清理名稱：移除掉尾部可能殘留的數字（通常是權證名稱自帶的數字，不是數據）
             name = re.sub(r'(現股|融資|融券|代銷)', '', raw_name).strip()
 
-            # --- 關鍵：提取純數字數據，處理「粘連」問題 ---
+            # --- 關鍵：提取純數字數據，嚴格限制在代碼右側 ---
             data_numbers = []
-            for it in row[s_idx:]:
-                txt = it['text'].upper().replace(',', '').strip()
-                
-                # 如果這個區塊包含了代碼，且長度明顯過長，嘗試拆分
-                if symbol in txt and len(txt) > len(symbol):
-                    # 範例: "5502043316" (55 + 020433 + 16)
-                    parts = txt.split(symbol)
-                    for p in parts:
-                        if p: # 這裡 p 可能是 "55" 或 "16"
-                            nums = re.findall(r'-?\d+\.?\d*', p)
-                            for n in nums:
-                                try: data_numbers.append(float(n))
-                                except: continue
-                    # 同時也要把 symbol 附近可能跟它粘在一起的數字算進去，但通常我們只需要 symbol 兩側的
-                else:
-                    # 正常的純數字或不含 symbol 的區塊
-                    nums = re.findall(r'-?\d+\.?\d*', txt)
-                    for n in nums:
-                        try:
-                            # 排除掉剛好等於代碼的純數字塊，避免重複計算
-                            if n == symbol and len(txt) == len(symbol):
-                                continue
-                            data_numbers.append(float(n))
-                        except: continue
+            for it in row:
+                # 僅處理位於代碼右側的數字塊，避免抓到名稱裡的數字 (如 56購01)
+                if it['x'] > s_item['x'] - 5:
+                    txt = it['text'].upper().replace(',', '').strip()
+                    
+                    # 處理代碼粘連
+                    if symbol in txt and len(txt) > len(symbol):
+                        parts = txt.split(symbol)
+                        for p in parts:
+                            if p:
+                                nums = re.findall(r'-?\d+\.?\d*', p)
+                                for n in nums:
+                                    try: data_numbers.append(float(n))
+                                    except: continue
+                    else:
+                        # 正常數字塊
+                        nums = re.findall(r'-?\d+\.?\d*', txt)
+                        for n in nums:
+                            try:
+                                # 排除掉純代碼
+                                if n == float(symbol) and len(txt) == len(symbol):
+                                    continue
+                                data_numbers.append(float(n))
+                            except: continue
 
             quantity = 0
             avg_price = 0.0
             profit = 0
 
-            # 針對拆分後的數字進行欄位分配
+            # 針對代碼右側的數字進行精準分配
             if len(data_numbers) >= 1:
-                # 1. 數量：通常是整行中第一個出現的數字 (或在代碼左側/粘連左側)
-                quantity = int(data_numbers[0])
+                # 1. 數量：取右側第一個整數
+                for n in data_numbers:
+                    if n == int(n) and n > 0:
+                        quantity = int(n)
+                        break
                 
-                # 2. 損益：尋找之後出現的較大整數
-                if len(data_numbers) >= 2:
-                    for n in data_numbers[1:]:
-                        if n == int(n) and abs(n) > 1:
-                            profit = int(n)
-                            break
-                            
-                # 3. 均價：從最後面往前找合理的價格
+                # 2. 均價：取帶有小數或合理的價格區間
                 for n in reversed(data_numbers):
-                    if 0 < n < 5000:
-                        if n != quantity:
+                    if 0 < n < 5000 and n != quantity:
+                        # 優先取有小數點的
+                        if n != int(n) or avg_price == 0:
                             avg_price = n
-                            break
+                            if n != int(n): break 
+
+                # 3. 損益：取整行最後一個整數 (損益通常在最右邊)
+                for n in reversed(data_numbers):
+                    if n == int(n) and n != quantity:
+                        profit = int(n)
+                        break
+
+            results.append({
+                "symbol": symbol,
+                "name": name if name else "未知標的",
+                "quantity": abs(quantity),
+                "avg_price": avg_price,
+                "profit": profit
+            })
 
             results.append({
                 "symbol": symbol,
