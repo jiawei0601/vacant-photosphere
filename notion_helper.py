@@ -142,16 +142,15 @@ class NotionHelper:
                 query_result = resp.json()
 
             if query_result.get("results"):
-                # 已存在，更新日期或狀態
+                # 已存在，更新日期
                 page_id = query_result["results"][0]["id"]
                 self.notion.pages.update(
                     page_id=page_id,
                     properties={
-                        "更新時間": {"date": {"start": target_date}},
-                        "狀態": {"status": {"name": "庫存中"}}
+                        "更新時間": {"date": {"start": target_date}}
                     }
                 )
-                print(f"✅ 更新庫存成功: {name} ({symbol})")
+                print(f"Update Success: {name} ({symbol})")
             else:
                 # 不存在，新增
                 self.notion.pages.create(
@@ -159,14 +158,13 @@ class NotionHelper:
                     properties={
                         "名稱": {"title": [{"text": {"content": name}}]},
                         "代碼": {"rich_text": [{"text": {"content": symbol}}]},
-                        "更新時間": {"date": {"start": target_date}},
-                        "狀態": {"status": {"name": "庫存中"}}
+                        "更新時間": {"date": {"start": target_date}}
                     }
                 )
-                print(f"✅ 新增庫存成功: {name} ({symbol})")
+                print(f"Create Success: {name} ({symbol})")
             return True
         except Exception as e:
-            print(f"❌ 操作 Notion 庫存資料庫時發生錯誤 ({symbol}): {e}")
+            print(f"Notion Error ({symbol}): {e}")
             return False
 
     def update_alert_prices(self, page_id, high_alert=None, low_alert=None):
