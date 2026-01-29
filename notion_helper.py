@@ -104,9 +104,9 @@ class NotionHelper:
         tw_time = datetime.now(timezone(timedelta(hours=8)))
         return tw_time.isoformat()
 
-    def upsert_inventory_item(self, symbol, name, date_str=None):
+    def upsert_inventory_item(self, symbol, name, quantity=0, avg_price=0.0, profit=0, date_str=None):
         """
-        更新或新增庫存資料庫項
+        更新或新增庫存資料庫項 (包含數量、均價、損益)
         """
         if not self.notion:
             print("❌ Notion Client 未初始化")
@@ -119,6 +119,12 @@ class NotionHelper:
         # 如果傳入的是 YYYY-MM-DD，轉成 ISO 格式
         if date_str and len(date_str) == 10:
              target_date = f"{date_str}T00:00:00.000+08:00"
+
+        # 整理數值屬性
+        num_props = {}
+        if quantity: num_props["庫存數量"] = {"number": float(quantity)}
+        if avg_price: num_props["成本均價"] = {"number": float(avg_price)}
+        if profit: num_props["損益"] = {"number": float(profit)}
 
         try:
             # 1. 查詢是否已存在 (手動 API 請求以避免函式庫版本問題)
@@ -142,26 +148,32 @@ class NotionHelper:
                 query_result = resp.json()
 
             if query_result.get("results"):
-                # 已存在，更新日期
+                # 已存在，更新
                 page_id = query_result["results"][0]["id"]
+                props = {
+                    "更新時間": {"date": {"start": target_date}}
+                }
+                props.update(num_props)
+                
                 self.notion.pages.update(
                     page_id=page_id,
-                    properties={
-                        "更新時間": {"date": {"start": target_date}}
-                    }
+                    properties=props
                 )
-                print(f"Update Success: {name} ({symbol})")
+                print(f"Update Success: {name} ({symbol}) | Q:{quantity} P:{profit}")
             else:
                 # 不存在，新增
+                props = {
+                    "名稱": {"title": [{"text": {"content": name}}]},
+                    "代碼": {"rich_text": [{"text": {"content": symbol}}]},
+                    "更新時間": {"date": {"start": target_date}}
+                }
+                props.update(num_props)
+
                 self.notion.pages.create(
                     parent={"database_id": self.inventory_database_id},
-                    properties={
-                        "名稱": {"title": [{"text": {"content": name}}]},
-                        "代碼": {"rich_text": [{"text": {"content": symbol}}]},
-                        "更新時間": {"date": {"start": target_date}}
-                    }
+                    properties=props
                 )
-                print(f"Create Success: {name} ({symbol})")
+                print(f"Create Success: {name} ({symbol}) | Q:{quantity} P:{profit}")
             return True
         except Exception as e:
             print(f"Notion Error ({symbol}): {e}")

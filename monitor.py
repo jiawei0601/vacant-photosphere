@@ -295,10 +295,19 @@ class MarketMonitor:
             stocks = self.ocr.extract_stock_info(image_path)
             results = []
             for s in stocks:
-                success = self.notion.upsert_inventory_item(s['symbol'], s['name'], date_str=upload_date)
+                success = self.notion.upsert_inventory_item(
+                    s['symbol'], 
+                    s['name'], 
+                    quantity=s.get('quantity', 0),
+                    avg_price=s.get('avg_price', 0.0),
+                    profit=s.get('profit', 0),
+                    date_str=upload_date
+                )
                 results.append({
                     "symbol": s['symbol'],
                     "name": s['name'],
+                    "quantity": s.get('quantity', 0),
+                    "profit": s.get('profit', 0),
                     "status": "成功" if success else "失敗"
                 })
             return results
