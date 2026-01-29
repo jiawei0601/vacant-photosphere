@@ -168,13 +168,15 @@ class InventoryOCR:
         
         cv_img = cv2.imread(image_path)
         
-        # 1. 根據 Y 座標將資料分行 (容許 15 像素誤差)
+        # 1. 根據 Y 座標將資料分行 (改善分組邏輯)
         items.sort(key=lambda i: i['y'])
         rows = []
         if items:
             current_row = [items[0]]
             for i in range(1, len(items)):
-                if abs(items[i]['y'] - current_row[0]['y']) < 15:
+                # 計算與當前行平均 Y 的距離
+                avg_y = sum([it['y'] for it in current_row]) / len(current_row)
+                if abs(items[i]['y'] - avg_y) < 25: # 提高容差到 25
                     current_row.append(items[i])
                 else:
                     rows.append(sorted(current_row, key=lambda r: r['x']))
@@ -189,17 +191,16 @@ class InventoryOCR:
             "price": None
         }
         
-        # 遍歷前幾行尋找表頭
-        for row in rows[:5]:
+        # 遍歷前幾行尋找表頭，加入更多關鍵字變體
+        for row in rows[:8]: # 掃描範圍擴大到前 8 行
             for it in row:
                 txt = it['text']
-                if "代碼" in txt or "名稱" in txt: anchors["symbol"] = it['x']
-                if "即時庫存" in txt or "庫存" in txt: anchors["quantity"] = it['x']
-                if "損益" in txt: anchors["profit"] = it['x']
-                if "付出成本" in txt or "成本均價" in txt or "均價" in txt: anchors["price"] = it['x']
+                if any(k in txt for k in ["代碼", "名稱", "標的"]): anchors["symbol"] = it['x']
+                if any(k in txt for k in ["即時庫存", "庫存", "股數", "量"]): anchors["quantity"] = it['x']
+                if any(k in txt for k in ["損益", "試算", "原幣損益"]): anchors["profit"] = it['x']
+                if any(k in txt for k in ["付出成本", "成本均價", "成本", "均價"]): anchors["price"] = it['x']
 
-        # 如果沒找到表頭，設定預設權重位置 (根據常見比例)
-        print(f"📍 偵測到表頭定位: {anchors}")
+        print(f"📍 [DEBUG] 座標定位點: {anchors}")
 
         results = []
         symbol_pattern = re.compile(r'\b(\d{4}|\d{6})\b')
@@ -209,28 +210,34 @@ class InventoryOCR:
             symbols = symbol_pattern.findall(row_str)
             if not symbols: continue
             
-            # 找到代碼與其 Item
-            symbol = symbols[0] # 取第一個找到的
+            # 定位股票代碼
+            symbol = symbols[0]
             s_item = next((it for it in row if symbol in it['text']), None)
             if not s_item: continue
 
-            # 提取名稱：尋找代碼左側或鄰近的中文塊
-            name = ""
+            # --- 提取名稱 (優化後) ---
+            # 整合代碼左側所有的文字，且移除不必要的標誌
+            name_parts = []
             for it in row:
-                if it['x'] < s_item['x'] + 50: # 代碼左側或同塊
-                    txt = re.sub(r'(現股|現\s?股|融資|融券|代銷|[0-9])', '', it['text'])
-                    txt = re.sub(r'[^\u4e00-\u9fff]', '', txt)
-                    if txt: name += txt
+                if it['x'] < s_item['x'] + 10:
+                    txt = it['text'].replace(symbol, '').strip()
+                    # 移除交易類型字
+                    txt = re.sub(r'(現股|現\s?股|融資|融券|代銷)', '', txt)
+                    # 移除單獨的標點符號
+                    txt = txt.strip('|[]【】() ')
+                    if txt: name_parts.append(txt)
+            
+            name = "".join(name_parts).strip()
             
             # --- 投影定位取值 ---
-            # 我們將行內所有數字及其 X 座標拿出來
             val_candidates = []
             for it in row:
-                # 尋找數字塊
-                nums = re.findall(r'-?\d+\.?\d*', it['text'].replace(',', ''))
-                for n in nums:
+                # 取得所有數字塊
+                tokens = re.findall(r'-?\d+\.?\d*', it['text'].replace(',', ''))
+                for n in tokens:
                     try:
                         f_v = float(n)
+                        # 排除掉跟代碼一模一樣的數字
                         if f_v == float(symbol) and len(n) == len(symbol): continue
                         val_candidates.append({
                             "val": f_v,
@@ -243,27 +250,26 @@ class InventoryOCR:
             profit = 0
             avg_price = 0.0
 
-            # 根據與 Anchor 的距離分配數值
-            if anchors["quantity"] is not None:
-                match = min(val_candidates, key=lambda c: abs(c['x'] - anchors["quantity"]), default=None)
-                if match: quantity = int(match['val'])
+            # 根據與 Anchor 的水平距離分配數值
+            if anchors["quantity"] is not None and val_candidates:
+                match = min(val_candidates, key=lambda c: abs(c['x'] - anchors["quantity"]))
+                quantity = int(match['val'])
 
-            if anchors["profit"] is not None:
-                match = min(val_candidates, key=lambda c: abs(c['x'] - anchors["profit"]), default=None)
-                if match: 
-                    profit = int(match['val'])
-                    # 色彩修正
-                    c_sign = self._get_color_sign(cv_img, match['vertices'])
-                    if c_sign == -1: profit = -abs(profit)
-                    if c_sign == 1: profit = abs(profit)
+            if anchors["profit"] is not None and val_candidates:
+                match = min(val_candidates, key=lambda c: abs(c['x'] - anchors["profit"]))
+                profit = int(match['val'])
+                # 色彩偵測應用於損益
+                c_sign = self._get_color_sign(cv_img, match['vertices'])
+                if c_sign == -1: profit = -abs(profit)
+                if c_sign == 1: profit = abs(profit)
 
-            if anchors["price"] is not None:
-                match = min(val_candidates, key=lambda c: abs(c['x'] - anchors["price"]), default=None)
-                if match: avg_price = match['val']
+            if anchors["price"] is not None and val_candidates:
+                match = min(val_candidates, key=lambda c: abs(c['x'] - anchors["price"]))
+                avg_price = match['val']
 
-            # 備援邏輯：如果沒表頭或沒勾到，用舊的排序邏輯 (略)
-            if not quantity and val_candidates:
-                 quantity = int(val_candidates[0]['val'])
+            # 備援：如果某個欄位沒對到，但在代碼右側還有唯一的數字，嘗試補位
+            if not quantity and len(val_candidates) >= 1:
+                quantity = int(val_candidates[0]['val'])
 
             results.append({
                 "symbol": symbol,
@@ -273,7 +279,7 @@ class InventoryOCR:
                 "profit": profit
             })
 
-        print(f"✅ OCR 精準分析完成，找到 {len(results)} 個標的。")
+        print(f"✅ OCR 精準定位分析完成，找到 {len(results)} 個標的。")
         return results
 
 if __name__ == "__main__":
