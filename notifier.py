@@ -184,17 +184,22 @@ class Notifier:
             await update.message.reply_text("請輸入有效的數字。")
 
     async def _set_mode_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """處理 /mode 指令，切換交易時段外監控"""
         if not context.args:
-            await update.message.reply_text("請提供參數，例如：/mode on 或 /mode off")
+            # 如果沒給參數，顯示目前狀態
+            if self.config_callback:
+                # 這裡需要一個獲取狀態的方式，或者我們直接在 notifier 存一份
+                pass
+            await update.message.reply_text("💡 目前模式選項：\n• `/mode on` 或 `/mode true` - 開啟全天候監控\n• `/mode off` 或 `/mode false` - 僅在交易時段 (09:00-13:35) 監控")
             return
         
         mode = context.args[0].lower()
-        allow = True if mode == "on" else False
+        allow = mode in ["on", "true", "1"]
         
         if self.config_callback:
             await self.config_callback(allow_outside=allow)
-            status = "開啟" if allow else "關閉"
-            await update.message.reply_text(f"✅ 已{status}交易時段外監控。")
+            status = "開啟 [全天候監控]" if allow else "關閉 [僅限交易時段]"
+            await update.message.reply_text(f"✅ 設定成功：已切換為 {status}。\n\n目前的交易時段設定為：週一至週五 09:00 - 13:35。")
 
     async def _set_high_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(context.args) < 2:

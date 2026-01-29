@@ -500,17 +500,21 @@ class MarketMonitor:
                             self.last_order_stats_date = today
 
                 # 2. 處理常規價格檢查
+                import time as py_time
+                current_unix = py_time.time()
+                
                 if self.is_market_open():
-                    import time as py_time
-                    current_unix = py_time.time()
                     if current_unix - self.last_check_time >= self.interval:
+                        print(f"[{now}] 執行自動價格檢查 (間隔: {self.interval}s)...")
                         success, fail = await self.check_once()
                         self.last_check_time = current_unix
                         # 自動檢查完成後發送訊息
                         await self.notifier.send_message(f"✅ 定期價格檢查完成。成功: {success}, 失敗: {fail}")
                 else:
-                    # 非開盤時間不需要執行 check_once，除非環境變數有開
-                    pass
+                    # 如果不是交易時段，且有記錄過上次檢查時間，則靜默跳過
+                    if current_unix - self.last_check_time >= self.interval:
+                        print(f"[{now}] 非交易時段且未開啟全天候監控，跳過自動檢查。")
+                        self.last_check_time = current_unix
 
             except Exception as e:
                 print(f"監控迴圈發生錯誤: {e}")
