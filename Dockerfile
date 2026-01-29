@@ -8,9 +8,12 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 
-# 安裝系統相依套件 (基礎運行所需)
+# 安裝系統相依套件 (基礎運行所需，包含 OpenCV 需要的函式庫)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    libgl1 \
+    libglib2.0-0 \
+    libxcb1 \
     && rm -rf /var/lib/apt/lists/*
 
 # 安裝 Python 套件
