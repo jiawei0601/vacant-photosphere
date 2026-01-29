@@ -1,3 +1,6 @@
+import re
+import os
+import json
 import io
 import cv2
 import numpy as np
@@ -159,7 +162,6 @@ class InventoryOCR:
         """
         使用精準座標定位方式進行 OCR 辨識
         """
-        import re
         items = self.process_image(image_path)
         if not items:
             return []
