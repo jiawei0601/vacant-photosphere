@@ -473,15 +473,15 @@ class MarketMonitor:
                                 await self.notifier.send_message(message)
                                 self.last_noon_date = today
 
-                    # 14:00 盤後綜合大報告 (包含收盤總結、買賣力道、詳細標的數據)
-                    if dt_time(14, 0) <= curr_time < dt_time(14, 20):
+                    # 15:00 盤後綜合大報告 (包含收盤總結、買賣力道、詳細標的數據)
+                    if dt_time(15, 0) <= curr_time < dt_time(15, 20):
                         if self.last_daily_report_date != today:
                             report_data = await self.get_report_data(offset=0)
                             
                             try:
                                 # 嘗試生成圖片報告
                                 img_path = self.generator.generate_closing_report(report_data['sentiment'], report_data['stock_list'])
-                                caption = f"🏁 **台股每日盤後綜合報告 (14:00)**\n\n數據日期: `{report_data['date']}`"
+                                caption = f"🏁 **台股每日盤後綜合報告 (15:00)**\n\n數據日期: `{report_data['date']}`"
                                 await self.notifier.send_photo(img_path, caption=caption)
                             except Exception as e:
                                 print(f"圖片報告生成失敗，改發送文字: {e}")
@@ -492,7 +492,7 @@ class MarketMonitor:
                                     sentiment_msg = f"📊 **市場氣氛: {s['sentiment']}** | 量差: `{s['diff_vol']:+,}` | 過熱: `{s['overheat_index']:.2f}%` \n\n"
                                 
                                 summary = await self.get_detailed_summary(offset=0)
-                                message = f"🏁 **台股每日盤後綜合報告 (14:00)**\n\n{sentiment_msg}📋 **監控標的摘要**\n{summary}"
+                                message = f"🏁 **台股每日盤後綜合報告 (15:00)**\n\n{sentiment_msg}📋 **監控標的摘要**\n{summary}"
                                 await self.notifier.send_message(message)
                                 
                             self.last_daily_report_date = today

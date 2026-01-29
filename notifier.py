@@ -80,7 +80,7 @@ class Notifier:
                 "💡 **自動化通知**\n"
                 "• 09:00 - 開盤提醒\n"
                 "• 12:00 - 大盤午間報告 (含 MA20 判定)\n"
-                "• 14:00 - 盤後綜合大報告 (收盤總結 + 買賣力道 + 詳細數據)\n\n"
+                "• 15:00 - 盤後綜合大報告 (收盤總結 + 買賣力道 + 詳細數據)\n\n"
                 "⚠️ *系統預設每 30 分鐘自動檢查一次報價*。"
             )
             await update.message.reply_text(help_text, parse_mode='Markdown')

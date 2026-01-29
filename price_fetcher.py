@@ -323,9 +323,43 @@ class PriceFetcher:
                 idx = -1 - offset
                 last_row = df.iloc[idx]
                 
+                date_str = str(last_row.get('date', '未知日期'))
+                today_str = datetime.now().strftime("%Y-%m-%d")
+                
+                # --- [核心改進] 確保 offset=0 時拿到的是今天最新的資料 ---
+                # 如果 offset 是 0 且資料日期不是今天，且現在已過開盤時間 (09:00)
+                if offset == 0 and date_str != today_str and datetime.now().hour >= 9:
+                    print(f"[{symbol}] 資料僅更新至 {date_str}，嘗試以 SnapShot 補齊今日數據...")
+                    latest = self.get_last_price(symbol)
+                    if latest:
+                        # 建立一個補丁行
+                        patch_row = last_row.copy()
+                        patch_row['date'] = today_str
+                        patch_row['close'] = latest['price']
+                        # open/high/low 改用最新價暫代 (或從 snapshot 擴充，此處先採簡化做法)
+                        patch_row['open'] = patch_row['open'] if patch_row['open'] else latest['price']
+                        patch_row['high'] = max(patch_row['high'], latest['price'])
+                        patch_row['low'] = min(patch_row['low'], latest['price']) if patch_row['low'] > 0 else latest['price']
+                        
+                        # 將補丁加入 df 以便重新計算 MA20 (如果需要更精確的 MA20，需補在 df 末尾)
+                        new_df = df.copy()
+                        # 檢查是否已經有今天的日期 (避免重複)
+                        if str(new_df.iloc[-1].get('date')) != today_str:
+                             # 建立一個新的 DataFrame 行並附加
+                             new_row_df = pd.DataFrame([patch_row])
+                             new_df = pd.concat([new_df, new_row_df], ignore_index=True)
+                             # 重新計算 MA20
+                             new_df['ma20'] = new_df['close'].rolling(window=20).mean()
+                        
+                        last_row = new_df.iloc[-1]
+                        date_str = today_str
+                        # 更新 df 引用，以便後續漲跌幅計算使用正確的基準
+                        df = new_df
+                        idx = -1
+
                 # 處理漲跌幅
                 change_pct = None
-                if len(df) > abs(idx - 1):
+                if idx - 1 >= -len(df):
                     try:
                         prev_close = float(df.iloc[idx - 1]['close'])
                         current_close = float(last_row['close'])
@@ -333,8 +367,6 @@ class PriceFetcher:
                             change_pct = round(((current_close - prev_close) / prev_close) * 100, 2)
                     except:
                         pass
-                
-                date_str = last_row.get('date', '未知日期')
                 
                 # 處理最高/最低欄位 (FinMind 有時用 high/low, 有時用 max/min)
                 high_val = last_row.get('max') if 'max' in cols else last_row.get('high', 0)
@@ -387,20 +419,40 @@ class PriceFetcher:
 
     def get_ticker_ma(self, symbol, window=20):
         """
-        使用 yfinance 獲取特定代碼的移動平均線 (例如 MA20)
+        獲取特定代碼的移動平均線 (優先使用 Fugle)
         """
         try:
-            ticker = yf.Ticker(symbol)
+            from datetime import datetime, timedelta
+            now = datetime.now()
             # 抓取足以計算 MA 的歷史長度 (安全起見抓 60 天)
-            hist = ticker.history(period="60d")
-            if len(hist) < window:
+            end_date_str = now.strftime("%Y-%m-%d")
+            start_date_str = (now - timedelta(days=60)).strftime("%Y-%m-%d")
+            
+            df = None
+            # 1. 優先嘗試富果
+            if self.fugle_token:
+                # 處理指數轉換 (TAIEX -> IX0001)
+                fugle_symbol = symbol
+                if symbol == "^TWII" or symbol == "TAIEX":
+                    fugle_symbol = "IX0001"
+                
+                df = self._get_fugle_historical(fugle_symbol, start_date_str, end_date_str)
+            
+            # 2. 備援使用 yfinance
+            if df is None or df.empty:
+                ticker = yf.Ticker(symbol)
+                df = ticker.history(period="60d")
+                if not df.empty:
+                    df.columns = [c.lower() for c in df.columns]
+
+            if df is None or df.empty or len(df) < window:
                 return None, None
             
             # 計算 MA
-            hist['MA'] = hist['Close'].rolling(window=window).mean()
+            df['ma'] = df['close'].rolling(window=window).mean()
             
-            last_price = hist['Close'].iloc[-1]
-            last_ma = hist['MA'].iloc[-1]
+            last_price = df['close'].iloc[-1]
+            last_ma = df['ma'].iloc[-1]
             
             return round(float(last_price), 2), round(float(last_ma), 2)
         except Exception as e:
