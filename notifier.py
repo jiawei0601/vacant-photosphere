@@ -153,6 +153,10 @@ class Notifier:
         """設定用於庫存 OCR 的回呼函式"""
         self.inventory_callback = callback
 
+    def set_ocr_usage_callback(self, callback):
+        """設定用於獲取 OCR 使用量的回呼函式"""
+        self.ocr_usage_callback = callback
+
     async def _set_interval_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not context.args:
             await update.message.reply_text("請提供秒數，例如：/interval 300")
