@@ -87,44 +87,63 @@ class InventoryOCR:
         """
         data = self.process_image(image_path)
         if not data:
+            print("⚠️ OCR 沒有辨識出任何文字")
             return []
             
-        # 台灣股票代碼通常為 4 位數字，有時 5-6 位
-        symbol_pattern = re.compile(r'\b\d{4,6}\b')
+        # 台灣股票代碼通常為 4 位數字，有時 5-6 位 (權證/ETF)
+        # 放寬正則表達式，不強制要求雙向邊界，但要求字串中包含 4-6 位數字
+        symbol_pattern = re.compile(r'(\d{4,6})')
         found_stocks = {}
         
+        # 過濾清單：常見的表格標題文字，避免被誤認為股票名稱
+        filter_list = ["股票名稱", "代碼", "現價", "帳面", "獲利", "成本", "現現", "現現股", "現資", "資資", "資現", "幣別", "資產"]
+
         for i, item in enumerate(data):
             text = item['text']
             match = symbol_pattern.search(text)
+            
             if match:
-                symbol = match.group()
+                symbol = match.group(1)
                 
-                # 嘗試尋找名稱：通常在代碼的前面或後面一個索引
-                name = ""
-                # 向前找
-                if i > 0:
-                    prev_text = data[i-1]['text']
-                    if any('\u4e00' <= char <= '\u9fff' for char in prev_text):
-                        name = prev_text
-                # 向後找
-                if not name and i < len(data) - 1:
-                    next_text = data[i+1]['text']
-                    if any('\u4e00' <= char <= '\u9fff' for char in next_text):
-                        name = next_text
-                
-                # 清理名稱中的非中文字元
-                name = re.sub(r'[^\u4e00-\u9fff]', '', name)
-                
-                if symbol not in found_stocks:
-                    found_stocks[symbol] = name
+                # 如果該字串本身就是 4-6 位數字，或是帶有一些雜訊的代碼
+                if len(symbol) >= 4:
+                    # 嘗試尋找名稱：通常在代碼的前後
+                    name = ""
+                    # 1. 檢查同一個文字塊中是否有中文字 (例如 "台積電2330")
+                    if any('\u4e00' <= char <= '\u9fff' for char in text):
+                         # 去掉數字部分，剩下的可能是名稱
+                         name = re.sub(r'\d+', '', text).strip()
+                    
+                    # 2. 如果同塊沒有名稱，查看前後索引 (前後 2 個索引內)
+                    if not name:
+                        for offset in [-1, 1, -2, 2]:
+                            idx = i + offset
+                            if 0 <= idx < len(data):
+                                candidate = data[idx]['text']
+                                # 包含中文字且長度大於 1 且不在過濾清單中
+                                if any('\u4e00' <= char <= '\u9fff' for char in candidate) and len(candidate) > 1:
+                                    if not any(f in candidate for f in filter_list):
+                                        name = candidate
+                                        break
+                    
+                    # 清理名稱：移除一些已知的干擾字元，但保留權證名稱中的英數
+                    # 只移除一些明顯的表格文字
+                    for f in filter_list:
+                        name = name.replace(f, "")
+                    name = name.strip()
+                    
+                    if symbol not in found_stocks:
+                        # 只有當名稱不是純數字或太短時才記錄，或者至少給個預設名
+                        found_stocks[symbol] = name if name else "未知名稱"
         
         results = []
         for symbol, name in found_stocks.items():
             results.append({
                 "symbol": symbol,
-                "name": name if name else "未知名稱"
+                "name": name
             })
             
+        print(f"✅ OCR 分析完成，找到 {len(results)} 個標的")
         return results
 
 if __name__ == "__main__":
