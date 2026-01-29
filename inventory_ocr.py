@@ -230,46 +230,64 @@ class InventoryOCR:
             name = "".join(name_parts).strip()
             
             # --- 投影定位取值 ---
+            # 💡 核心策略：所有數據（數量、均價、損益）絕對位於「代碼」的右側
             val_candidates = []
             for it in row:
-                # 取得所有數字塊
-                tokens = re.findall(r'-?\d+\.?\d*', it['text'].replace(',', ''))
-                for n in tokens:
-                    try:
-                        f_v = float(n)
-                        # 排除掉跟代碼一模一樣的數字
-                        if f_v == float(symbol) and len(n) == len(symbol): continue
-                        val_candidates.append({
-                            "val": f_v,
-                            "x": it['x'],
-                            "vertices": it.get('vertices', [])
-                        })
-                    except: continue
+                if it['x'] > s_item['x'] + 5: # 嚴格過濾：只看右側內容
+                    tokens = re.findall(r'-?\d+\.?\d*', it['text'].replace(',', ''))
+                    for n in tokens:
+                        try:
+                            f_v = float(n)
+                            # 排除掉與代碼相同的數字 (避免誤抓)
+                            if f_v == float(symbol) and len(n) == len(symbol): continue
+                            val_candidates.append({
+                                "val": f_v,
+                                "x": it['x'],
+                                "vertices": it.get('vertices', [])
+                            })
+                        except: continue
 
             quantity = 0
             profit = 0
             avg_price = 0.0
 
             # 根據與 Anchor 的水平距離分配數值
-            if anchors["quantity"] is not None and val_candidates:
-                match = min(val_candidates, key=lambda c: abs(c['x'] - anchors["quantity"]))
-                quantity = int(match['val'])
+            if val_candidates:
+                # 1. 數量：找距離 quantity 錨點最近的數字
+                if anchors["quantity"] is not None:
+                    match = min(val_candidates, key=lambda c: abs(c['x'] - anchors["quantity"]))
+                    quantity = int(match['val'])
+                else:
+                    # 備援：代碼右邊第一個數字通常是數量
+                    quantity = int(val_candidates[0]['val'])
 
-            if anchors["profit"] is not None and val_candidates:
-                match = min(val_candidates, key=lambda c: abs(c['x'] - anchors["profit"]))
-                profit = int(match['val'])
-                # 色彩偵測應用於損益
-                c_sign = self._get_color_sign(cv_img, match['vertices'])
-                if c_sign == -1: profit = -abs(profit)
-                if c_sign == 1: profit = abs(profit)
+                # 2. 損益：找距離 profit 錨點最近的數字
+                if anchors["profit"] is not None:
+                    match = min(val_candidates, key=lambda c: abs(c['x'] - anchors["profit"]))
+                    profit = int(match['val'])
+                    # 色彩偵測
+                    c_sign = self._get_color_sign(cv_img, match['vertices'])
+                    if c_sign == -1: profit = -abs(profit)
+                    if c_sign == 1: profit = abs(profit)
+                else:
+                    # 備援：整行最右邊的整數絕對是損益
+                    for c in reversed(val_candidates):
+                        if c['val'] == int(c['val']):
+                            profit = int(c['val'])
+                            c_sign = self._get_color_sign(cv_img, c['vertices'])
+                            if c_sign == -1: profit = -abs(profit)
+                            break
 
-            if anchors["price"] is not None and val_candidates:
-                match = min(val_candidates, key=lambda c: abs(c['x'] - anchors["price"]))
-                avg_price = match['val']
-
-            # 備援：如果某個欄位沒對到，但在代碼右側還有唯一的數字，嘗試補位
-            if not quantity and len(val_candidates) >= 1:
-                quantity = int(val_candidates[0]['val'])
+                # 3. 均價：找距離 price 錨點最近或具有小數點特徵的
+                if anchors["price"] is not None:
+                    match = min(val_candidates, key=lambda c: abs(c['x'] - anchors["price"]))
+                    avg_price = match['val']
+                else:
+                    # 備援：尋找在數量與損益中間的數字
+                    for c in val_candidates:
+                        if abs(c['val'] - quantity) > 0.01 and abs(c['val'] - profit) > 0.01:
+                            avg_price = c['val']
+                            if '.' in str(c['val']): break
 
             results.append({
                 "symbol": symbol,
