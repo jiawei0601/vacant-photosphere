@@ -186,42 +186,53 @@ class InventoryOCR:
             
             name = re.sub(r'(現股|融資|融券|代銷)', '', raw_name).strip()
 
-            # --- 關鍵：提取純數字數據，並過濾掉流水號 ---
+            # --- 關鍵：提取純數字數據，處理「粘連」問題 ---
             data_numbers = []
             for it in row[s_idx:]:
-                txt = it['text'].upper().replace(symbol, '').replace(',', '').strip()
-                # 尋找所有數字
-                nums = re.findall(r'-?\d+\.?\d*', txt)
-                for n in nums:
-                    # 關鍵：流水號通常長度大於 8 位，我們要跳過這種數字
-                    if len(n.replace('.', '').replace('-', '')) >= 8:
-                        continue
-                    try:
-                        data_numbers.append(float(n))
-                    except: continue
+                txt = it['text'].upper().replace(',', '').strip()
+                
+                # 如果這個區塊包含了代碼，且長度明顯過長，嘗試拆分
+                if symbol in txt and len(txt) > len(symbol):
+                    # 範例: "5502043316" (55 + 020433 + 16)
+                    parts = txt.split(symbol)
+                    for p in parts:
+                        if p: # 這裡 p 可能是 "55" 或 "16"
+                            nums = re.findall(r'-?\d+\.?\d*', p)
+                            for n in nums:
+                                try: data_numbers.append(float(n))
+                                except: continue
+                    # 同時也要把 symbol 附近可能跟它粘在一起的數字算進去，但通常我們只需要 symbol 兩側的
+                else:
+                    # 正常的純數字或不含 symbol 的區塊
+                    nums = re.findall(r'-?\d+\.?\d*', txt)
+                    for n in nums:
+                        try:
+                            # 排除掉剛好等於代碼的純數字塊，避免重複計算
+                            if n == symbol and len(txt) == len(symbol):
+                                continue
+                            data_numbers.append(float(n))
+                        except: continue
 
             quantity = 0
             avg_price = 0.0
             profit = 0
 
-            # 針對剩餘的數字進行欄位分配
-            # 順序通常為: [庫存數量] -> [昨日餘額 (略過)] -> [損益] -> ... -> [均價]
+            # 針對拆分後的數字進行欄位分配
             if len(data_numbers) >= 1:
-                # 1. 數量
+                # 1. 數量：通常是整行中第一個出現的數字 (或在代碼左側/粘連左側)
                 quantity = int(data_numbers[0])
                 
-                # 2. 損益 (尋找第 2 或第 3 個整數，且排除掉與數量過於接近的小數字)
-                if len(data_numbers) >= 3:
-                    # 在中間區域找損益
-                    for n in data_numbers[1:4]:
-                        if n == int(n) and abs(n) > 0:
+                # 2. 損益：尋找之後出現的較大整數
+                if len(data_numbers) >= 2:
+                    for n in data_numbers[1:]:
+                        if n == int(n) and abs(n) > 1:
                             profit = int(n)
-                
-                # 3. 均價 (從最後面往前找，通常是帶有小數或價格合理的數值)
+                            break
+                            
+                # 3. 均價：從最後面往前找合理的價格
                 for n in reversed(data_numbers):
-                    if 0 < n < 5000: # 價格通常不會超過 5000
-                        # 避免均價抓到跟數量一樣的數字
-                        if n != quantity or data_numbers.count(n) > 1:
+                    if 0 < n < 5000:
+                        if n != quantity:
                             avg_price = n
                             break
 
