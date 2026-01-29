@@ -321,8 +321,41 @@ class PriceFetcher:
                 if 'close' not in cols:
                     print(f"[{symbol}] 缺乏 'close' 欄位。可用欄位: {cols}")
                     return None
+
+                # --- [強制更新今日即時數據] ---
+                today_str = now.strftime("%Y-%m-%d")
                 
-                # 計算 MA20
+                # 如果現在是台北時間 09:00 後，嘗試補齊或更新今日數據
+                if now.hour >= 9:
+                    latest = self.get_last_price(symbol)
+                    if latest:
+                        history_last_date = str(df.iloc[-1].get('date', ''))
+                        
+                        if history_last_date != today_str:
+                            # 情境 A: 歷史資料還沒今天的列，補一個新列
+                            patch_row = df.iloc[-1].copy()
+                            patch_row['date'] = today_str
+                            patch_row['close'] = latest['price']
+                            patch_row['open'] = latest['price']
+                            patch_row['high'] = latest['price']
+                            patch_row['low'] = latest['price']
+                            patch_row['volume'] = 0
+                            
+                            new_row_df = pd.DataFrame([patch_row])
+                            df = pd.concat([df, new_row_df], ignore_index=True)
+                            print(f"[{symbol}] 歷史資料無今日紀錄，已補齊 {today_str} 快訊價: {latest['price']}")
+                        else:
+                            # 情境 B: 歷史資料已有今日列 (但可能是舊的或預開盤價)，強制蓋掉 close
+                            # 這是修正「報告顯示 1820 但實時 1805」的關鍵
+                            idx_last = df.index[-1]
+                            old_close = df.at[idx_last, 'close']
+                            df.at[idx_last, 'close'] = latest['price']
+                            # 同步更新今日最高最低
+                            df.at[idx_last, 'high'] = max(df.at[idx_last, 'high'], latest['price'])
+                            df.at[idx_last, 'low'] = min(df.at[idx_last, 'low'], latest['price']) if df.at[idx_last, 'low'] > 0 else latest['price']
+                            print(f"[{symbol}] 歷史紀錄已含今日，強制將收盤價從 {old_close} 更新為快訊價: {latest['price']}")
+
+                # 計算 MA20 (在補齊/更新後計算)
                 df['ma20'] = df['close'].rolling(window=20).mean()
                 
                 if len(df) <= offset:
@@ -332,42 +365,9 @@ class PriceFetcher:
                 # 取得指定 offset 的資料 (最後一筆是 -1, 前一筆是 -2)
                 idx = -1 - offset
                 last_row = df.iloc[idx]
-                
                 date_str = str(last_row.get('date', '未知日期'))
-                today_str = now.strftime("%Y-%m-%d")
                 
-                # --- [核心改進] 確保 offset=0 時拿到的是今天最新的資料 ---
-                # 如果 offset 是 0 且資料日期不是今天，且現在已過台北開盤時間 (09:00)
-                if offset == 0 and date_str != today_str and now.hour >= 9:
-                    print(f"[{symbol}] 資料日期 {date_str} 非今日 {today_str}，啟動 SnapShot 補齊數據...")
-                    latest = self.get_last_price(symbol)
-                    if latest:
-                        # 建立一個補丁行
-                        patch_row = last_row.copy()
-                        patch_row['date'] = today_str
-                        patch_row['close'] = latest['price']
-                        # open/high/low 改用最新價暫代 (或從 snapshot 擴充，此處先採簡化做法)
-                        patch_row['open'] = patch_row['open'] if patch_row['open'] else latest['price']
-                        patch_row['high'] = max(patch_row['high'], latest['price'])
-                        patch_row['low'] = min(patch_row['low'], latest['price']) if patch_row['low'] > 0 else latest['price']
-                        
-                        # 將補丁加入 df 以便重新計算 MA20 (如果需要更精確的 MA20，需補在 df 末尾)
-                        new_df = df.copy()
-                        # 檢查是否已經有今天的日期 (避免重複)
-                        if str(new_df.iloc[-1].get('date')) != today_str:
-                             # 建立一個新的 DataFrame 行並附加
-                             new_row_df = pd.DataFrame([patch_row])
-                             new_df = pd.concat([new_df, new_row_df], ignore_index=True)
-                             # 重新計算 MA20
-                             new_df['ma20'] = new_df['close'].rolling(window=20).mean()
-                        
-                        last_row = new_df.iloc[-1]
-                        date_str = today_str
-                        # 更新 df 引用，以便後續漲跌幅計算使用正確的基準
-                        df = new_df
-                        idx = -1
-
-                # 處理漲跌幅
+                # 處理漲跌幅 (始終與前一筆比較)
                 change_pct = None
                 if idx - 1 >= -len(df):
                     try:
@@ -378,17 +378,17 @@ class PriceFetcher:
                     except:
                         pass
                 
-                # 處理最高/最低欄位 (FinMind 有時用 high/low, 有時用 max/min)
+                # 處理最高/最低欄位
                 high_val = last_row.get('max') if 'max' in cols else last_row.get('high', 0)
                 low_val = last_row.get('min') if 'min' in cols else last_row.get('low', 0)
                 
                 return {
                     "date": date_str,
                     "open": float(last_row.get('open', 0)),
-                    "close": float(last_row.get('close', 0)),
+                    "close": float(last_row['close']),
                     "high": float(high_val),
                     "low": float(low_val),
-                    "volume": int(last_row.get('trading_volume', 0)),
+                    "volume": int(last_row.get('trading_volume', 0)) if 'trading_volume' in last_row else int(last_row.get('volume', 0)),
                     "ma20": round(float(last_row.get('ma20', 0)), 2) if not pd.isna(last_row.get('ma20')) else None,
                     "change_pct": change_pct
                 }
