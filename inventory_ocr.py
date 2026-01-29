@@ -57,18 +57,20 @@ class InventoryOCR:
             for page in full_text_obj.pages:
                 for block in page.blocks:
                     for paragraph in block.paragraphs:
-                        # 獲取段落中心點 Y 座標作為排序基準
+                        # 獲取中心點座標
                         vertices = paragraph.bounding_box.vertices
-                        y_coords = [v.y for v in vertices]
-                        center_y = sum(y_coords) / len(y_coords)
-                        
-                        # 獲取段落中心點 X 座標
-                        x_coords = [v.x for v in vertices]
-                        center_x = sum(x_coords) / len(x_coords)
+                        center_y = sum([v.y for v in vertices]) / len(vertices)
+                        center_x = sum([v.x for v in vertices]) / len(vertices)
 
-                        para_text = "".join(["".join([s.text for s in w.symbols]) for w in paragraph.words])
+                        # 改進：文字塊之間必須保留空格，避免數字粘連
+                        words_text = []
+                        for word in paragraph.words:
+                            word_str = "".join([s.text for s in word.symbols])
+                            words_text.append(word_str)
                         
-                        if para_text:
+                        para_text = " ".join(words_text)
+                        
+                        if para_text.strip():
                             extracted_items.append({
                                 "text": para_text.strip(),
                                 "x": center_x,
@@ -82,99 +84,100 @@ class InventoryOCR:
 
     def extract_stock_info(self, image_path):
         """
-        利用座標分組技術精準提取表格資料
+        精準提取表格各欄位數據
         """
         items = self.process_image(image_path)
         if not items:
             return []
 
-        # 1. 根據 Y 座標分組 (允許 15 像素以內的誤差視為同一行)
+        # 1. 根據 Y 座標分組
         items.sort(key=lambda i: i['y'])
         rows = []
         if items:
             current_row = [items[0]]
             for i in range(1, len(items)):
-                if abs(items[i]['y'] - current_row[-1]['y']) < 20: # 稍微放寬行距
+                if abs(items[i]['y'] - current_row[-1]['y']) < 25: 
                     current_row.append(items[i])
                 else:
                     rows.append(sorted(current_row, key=lambda r: r['x']))
                     current_row = [items[i]]
             rows.append(sorted(current_row, key=lambda r: r['x']))
 
-        # 2. 遍歷每一行提取數據
         results = []
         symbol_pattern = re.compile(r'(\d{4,6}[A-Z]?)')
         
         for row in rows:
-            row_text_list = [item['text'] for item in row]
-            full_row_str = "|".join(row_text_list)
+            # 將整行的文字串接起來進行搜尋
+            row_str = " ".join([it['text'] for it in row]).upper()
+            match = symbol_pattern.search(row_str)
+            if not match: continue
+
+            symbol = match.group(1)
             
-            # 尋找代碼
-            match = symbol_pattern.search(full_row_str.upper())
-            if match:
-                symbol = match.group(1)
-                
-                # 尋找名稱 (通常在代碼附近的文字塊)
-                name = "未知名稱"
-                for i, item in enumerate(row):
-                    if symbol in item['text'].upper():
-                        # 如果同塊有中文
-                        if any('\u4e00' <= char <= '\u9fff' for char in item['text']):
-                            name = item['text'].replace(symbol, '').replace(symbol.lower(), '').strip()
-                        # 或者是前一塊
-                        elif i > 0 and any('\u4e00' <= char <= '\u9fff' for char in row[i-1]['text']):
-                            name = row[i-1]['text']
-                        break
-                
-                # 清理名稱
-                name = re.sub(r'[^\u4e00-\u9fff\d\w]', '', name).strip()
+            # 找到代碼所在的 Item 及其索引
+            s_item = None
+            s_idx = -1
+            for i, it in enumerate(row):
+                if symbol in it['text'].upper():
+                    s_item = it
+                    s_idx = i
+                    break
+            
+            if s_idx == -1: continue
 
-                # --- 提取數值數據 ---
-                quantity = 0
-                avg_price = 0.0
-                profit = 0
-                
-                # 建立一個包含所有純數字或帶逗號數字的列表 (依 X 座標排序)
-                numbers = []
-                for item in row:
-                    raw = item['text'].replace(',', '')
-                    # 處理帶正負號或小數點的數字
+            # 提取名稱：優先看代碼同塊或前一塊
+            name = ""
+            if any('\u4e00' <= char <= '\u9fff' for char in row[s_idx]['text']):
+                name = re.sub(r'[\d\w]', '', row[s_idx]['text']).strip()
+            if not name and s_idx > 0:
+                name = row[s_idx-1]['text']
+            name = re.sub(r'[^\u4e00-\u9fff\d\w\u5143\u592a\u5b9a\u5317]', '', name).strip() # 保留常見券商字
+
+            # --- 關鍵：提取代碼右側的純數字數據 ---
+            # 過濾掉代碼本身，僅保留代碼右側的數據塊
+            data_numbers = []
+            for it in row[s_idx:]:
+                # 排除代碼本身
+                txt = it['text'].upper().replace(symbol, '').replace(',', '').strip()
+                # 尋找所有數字格式 (含正負號與小數)
+                nums = re.findall(r'-?\d+\.?\d*', txt)
+                for n in nums:
                     try:
-                        clean_num = re.sub(r'[^-0-9.]', '', raw)
-                        if clean_num and clean_num not in [symbol, ""]:
-                            numbers.append(float(clean_num))
-                    except:
-                        continue
+                        data_numbers.append(float(n))
+                    except: continue
 
-                # 根據台股常見券商表格版面推算：
-                # 截圖順序: [代碼] .. [庫存] .. [損益] .. [均價]
-                # 注意：這只是試探性邏輯，可以根據您的截圖微調
-                if len(numbers) >= 3:
-                     # 通常較大的整數是庫存，帶小數的是均價，損益可能有正負
-                     # 我們根據位置推測：
-                     # [即時庫存] 通常出現在代碼後方的第 1~2 個數字
-                     quantity = int(numbers[0]) if numbers[0] == int(numbers[0]) else 0
-                     
-                     # [損益] 搜尋包含正負號或較大數值的
-                     for n in numbers:
-                         if abs(n) > 50 and n == int(n): # 損益通常是較大整數
-                             profit = int(n)
-                             break
-                     
-                     # [均價] 通常是較小的、帶有小數點的
-                     for n in numbers:
-                         if 0 < n < 10000 and n != quantity:
-                             avg_price = n # 暫取最後一個符合條件的
+            quantity = 0
+            avg_price = 0.0
+            profit = 0
+
+            # 根據台股常見表格列順序推斷：
+            # [代碼/名稱] -> [即時庫存] -> [昨日餘額] -> [損益試算] -> ... -> [成本均價]
+            if len(data_numbers) >= 3:
+                # 1. 數量 (通常是代碼後第一個整數)
+                quantity = int(data_numbers[0])
                 
-                results.append({
-                    "symbol": symbol,
-                    "name": name if name else "未知名稱",
-                    "quantity": quantity,
-                    "avg_price": avg_price,
-                    "profit": profit
-                })
+                # 2. 損益 (通常是第 3 個數字，且數值較大)
+                # 為了穩健，我們找第 2 或第 3 個整數
+                for n in data_numbers[1:4]:
+                    if n == int(n) and abs(n) > 1:
+                        profit = int(n)
+                
+                # 3. 均價 (通常是倒數第 2 或第 3 個，且通常帶小數或與現價接近)
+                # 我們從右側搜尋
+                for n in reversed(data_numbers):
+                    if 0 < n < 10000 and n != quantity and n != profit:
+                        avg_price = n
+                        break
 
-        print(f"✅ OCR Row-Analysis Done. Found {len(results)} items.")
+            results.append({
+                "symbol": symbol,
+                "name": name if name else "未知名稱",
+                "quantity": abs(quantity), # 確保數量為正
+                "avg_price": avg_price,
+                "profit": profit
+            })
+
+        print(f"✅ OCR 精準分析完成，找到 {len(results)} 個標的。")
         return results
 
 if __name__ == "__main__":
