@@ -24,6 +24,7 @@ class Notifier:
             self.app.add_handler(CommandHandler("sethigh", self._set_high_command))
             self.app.add_handler(CommandHandler("setlow", self._set_low_command))
             self.app.add_handler(CommandHandler("interval", self._set_interval_command))
+            self.app.add_handler(CommandHandler("settime", self._set_interval_command))
             self.app.add_handler(CommandHandler("mode", self._set_mode_command))
             self.app.add_handler(CommandHandler("prev", self._prev_command))
             self.app.add_handler(CommandHandler("show", self._show_command))
@@ -77,11 +78,14 @@ class Notifier:
                 "⚙️ **警報管理**\n"
                 "• `/stop [代碼]` - 暫停特定標的的價格警報 (例如: `/stop 2330`)\n"
                 "• `/start [代碼]` - 恢復特定標的的價格警報\n\n"
+                "⚙️ **系統設定**\n"
+                "• `/settime [秒數]` - 設定報價檢查間隔 (例如: `/settime 300`)\n"
+                "• `/mode [on/off]` - 切換是否在非交易時段監控\n\n"
                 "💡 **自動化通知**\n"
                 "• 09:00 - 開盤提醒\n"
                 "• 12:00 - 大盤午間報告 (含 MA20 判定)\n"
                 "• 15:00 - 盤後綜合大報告 (收盤總結 + 買賣力道 + 詳細數據)\n\n"
-                "⚠️ *系統預設每 30 分鐘自動檢查一次報價*。"
+                "⚠️ *目前報價檢查間隔可透過 /settime 修改*。"
             )
             await update.message.reply_text(help_text, parse_mode='Markdown')
         except Exception as e:
@@ -167,21 +171,23 @@ class Notifier:
         self.fubon_sync_callback = callback
 
     async def _set_interval_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """處理 /settime 指令，設定自動檢查間隔"""
         if not context.args:
-            await update.message.reply_text("請提供秒數，例如：/interval 300")
+            await update.message.reply_text("💡 **設定自動檢查時間**\n\n指令格式：`/settime [秒數]`\n例如：\n• `/settime 300` (設定為 5 分鐘)\n• `/settime 600` (設定為 10 分鐘)\n\n*注意：間隔最快不得低於 60 秒。*")
             return
         
         try:
             seconds = int(context.args[0])
             if seconds < 60:
-                await update.message.reply_text("為了避免被 API 封鎖，間隔請至少設定為 60 秒。")
+                await update.message.reply_text("⚠️ 為了避免 API 存取過於頻繁導致封鎖，間隔請至少設定為 **60** 秒。")
                 return
             
             if self.config_callback:
                 await self.config_callback(interval=seconds)
-                await update.message.reply_text(f"✅ 已將檢查間隔更新為 {seconds} 秒。")
+                mins = round(seconds / 60, 1)
+                await update.message.reply_text(f"✅ **設定成功**\n自動價格檢查間隔已更變為：`{seconds}` 秒 (約 {mins} 分鐘)。")
         except ValueError:
-            await update.message.reply_text("請輸入有效的數字。")
+            await update.message.reply_text("❌ 請輸入有效的數字（秒數）。")
 
     async def _set_mode_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """處理 /mode 指令，切換交易時段外監控"""
