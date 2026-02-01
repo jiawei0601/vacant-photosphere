@@ -241,26 +241,7 @@ class Notifier:
         except ValueError:
             await update.message.reply_text("價格請輸入數字。")
 
-    async def _show_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not self.data_callback:
-            await update.message.reply_text("系統尚未準備好，請稍後再試。")
-            return
-            
-        try:
-            # 支援 /show list 作為別名
-            show_type = "all"
-            if context.args and context.args[0].lower() == "list":
-                show_type = "list"
-                
-            summary = await self.data_callback()
-            if not summary:
-                await update.message.reply_text("目前的監控清單為空。")
-            else:
-                title = "📊 **目前監控清單摘要**" if show_type != "list" else "📋 **目前監控清單**"
-                await update.message.reply_text(f"{title}\n\n{summary}", parse_mode='Markdown')
-        except Exception as e:
-            await update.message.reply_text(f"❌ 執行 /show 時發生錯誤: {e}")
-            print(f"Error in _show_command: {e}")
+
 
     async def _market_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.market_callback:
@@ -489,7 +470,7 @@ class Notifier:
             return
 
         try:
-            await update.message.reply_text("🖼️ 接收到圖片，正在準備進行 OCR 辨識，請稍候...")
+            await update.message.reply_text("🖼️ 接收到圖片，正在準備進行 OCR 辨識 (Google Cloud Vision)，請稍候...")
             
             # 下載圖片
             photo_file = await update.message.photo[-1].get_file()

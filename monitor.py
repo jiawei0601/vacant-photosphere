@@ -8,7 +8,7 @@ from price_fetcher import PriceFetcher
 from notion_helper import NotionHelper
 from notifier import Notifier
 from report_generator import ReportGenerator
-from inventory_ocr import InventoryOCR
+from google_vision_ocr import GoogleVisionOCR
 
 load_dotenv()
 
@@ -18,7 +18,7 @@ class MarketMonitor:
         self.notion = NotionHelper()
         self.notifier = Notifier()
         self.generator = ReportGenerator()
-        self.ocr = None # 延遲載入 OCR
+        self.ocr = GoogleVisionOCR()
         self.interval = int(os.getenv("CHECK_INTERVAL_SECONDS", 600))
         self.allow_outside = os.getenv("ALLOW_OUTSIDE_MARKET_HOURS", "false").lower() == "true"
         self.last_open_date = None
@@ -289,9 +289,6 @@ class MarketMonitor:
 
     async def inventory_callback(self, image_path, upload_date=None):
         """處理庫存截圖解析與更新"""
-        if self.ocr is None:
-            self.ocr = InventoryOCR()
-        
         try:
             # --- 新增：清空資料庫邏輯 ---
             import time as py_time
