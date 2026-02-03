@@ -109,6 +109,86 @@ class PriceFetcher:
         print(f"[{symbol}] 無法從所有來源獲取報價。")
         return None
 
+    def get_five_day_stats(self, symbol):
+        """
+        獲取股票最近五個交易日的詳細數據 (含 MA5, MA20)
+        """
+        try:
+            # 獲取約 40 天的資料以確保計算出 MA20
+            now = self._get_taipei_now()
+            end_date_str = now.strftime("%Y-%m-%d")
+            start_date_str = (now - timedelta(days=40)).strftime("%Y-%m-%d")
+            
+            # 使用統一歷史抓取邏輯
+            fugle_sym = symbol
+            if symbol.upper() in ["TAIEX", "^TWII"]: fugle_sym = "IX0001"
+            
+            df = None
+            if self.fugle_token:
+                df = self._get_fugle_historical(fugle_sym, start_date_str, end_date_str)
+            
+            if df is None or df.empty:
+                # 備援使用 FinMind (注意: FinMind 歷史資料不支援指數代碼 IX0001，直接用原始代碼)
+                df = self.loader.taiwan_stock_daily(stock_id=symbol, start_date=start_date_str, end_date=end_date_str)
+            
+            if df is not None and not df.empty:
+                df.columns = [c.lower() for c in df.columns]
+                # 計算 MA5 與 MA20
+                df['ma5'] = df['close'].rolling(window=5).mean()
+                df['ma20'] = df['close'].rolling(window=20).mean()
+                
+                # 取得最後 5 筆
+                last_5_days = df.tail(5).copy()
+                stats_list = []
+                
+                for _, row in last_5_days.iterrows():
+                    stats_list.append({
+                        "date": str(row.get('date', '未知')),
+                        "open": float(row.get('open', 0)),
+                        "close": float(row.get('close', 0)),
+                        "high": float(row.get('high', row.get('max', 0))),
+                        "low": float(row.get('low', row.get('min', 0))),
+                        "volume": int(row.get('trading_volume', row.get('volume', 0))),
+                        "ma5": round(float(row['ma5']), 2) if not pd.isna(row.get('ma5')) else None,
+                        "ma20": round(float(row['ma20']), 2) if not pd.isna(row.get('ma20')) else None,
+                        "fetch_time": now.strftime("%H:%M:%S")
+                    })
+                return stats_list
+            return None
+        except Exception as e:
+            print(f"[{symbol}] get_five_day_stats Error: {e}")
+            return None
+
+    def get_ticker_ma(self, symbol, window=20):
+        """獲取特定代碼的移動平均線"""
+        try:
+            now = self._get_taipei_now()
+            end_date_str = now.strftime("%Y-%m-%d")
+            start_date_str = (now - timedelta(days=60)).strftime("%Y-%m-%d")
+            
+            fugle_sym = symbol
+            if symbol.upper() in ["TAIEX", "^TWII"]: fugle_sym = "IX0001"
+            
+            df = None
+            if self.fugle_token:
+                df = self._get_fugle_historical(fugle_sym, start_date_str, end_date_str)
+            
+            if df is None or df.empty:
+                # 備援 yfinance
+                ticker = yf.Ticker(symbol if symbol != "TAIEX" else "^TWII")
+                df = ticker.history(period="60d")
+                if not df.empty:
+                    df.columns = [c.lower() for c in df.columns]
+
+            if df is None or df.empty or len(df) < window:
+                return None, None
+            
+            df['ma'] = df['close'].rolling(window=window).mean()
+            return round(float(df['close'].iloc[-1]), 2), round(float(df['ma'].iloc[-1]), 2)
+        except Exception as e:
+            print(f"[{symbol}] get_ticker_ma Error: {e}")
+            return None, None
+
     def _get_fugle_snapshot(self, symbol):
         """獲取富果行情快照"""
         if not self.fugle_token: return None
