@@ -52,7 +52,11 @@ class PriceFetcher:
         try:
             # 1. 優先嘗試富果 (由使用者要求)
             if self.fugle_token:
-                fugle_data = self._get_fugle_snapshot(symbol)
+                fugle_symbol = symbol
+                if symbol == "^TWII" or symbol == "TAIEX":
+                    fugle_symbol = "IX0001"
+                    
+                fugle_data = self._get_fugle_snapshot(fugle_symbol)
                 if fugle_data:
                     # 更新快取
                     self.price_cache[symbol] = {
@@ -132,7 +136,11 @@ class PriceFetcher:
             return None
         
         try:
-            url = f"https://api.fugle.tw/marketdata/v1.0/stock/snapshot/{symbol}"
+            # 判斷是否為指數 (IX0001 等)
+            is_index = symbol.startswith("IX")
+            path_type = "index" if is_index else "stock"
+            
+            url = f"https://api.fugle.tw/marketdata/v1.0/{path_type}/snapshot/{symbol}"
             headers = {"X-API-KEY": self.fugle_token}
             response = requests.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
@@ -196,7 +204,11 @@ class PriceFetcher:
             return None
         
         try:
-            url = f"https://api.fugle.tw/marketdata/v1.0/stock/historical/candles/{symbol}"
+            # 判斷是否為指數 (IX0001 等)
+            is_index = symbol.startswith("IX")
+            path_type = "index" if is_index else "stock"
+            
+            url = f"https://api.fugle.tw/marketdata/v1.0/{path_type}/historical/candles/{symbol}"
             params = {"from": start_date, "to": end_date, "fields": "open,high,low,close,volume"}
             headers = {"X-API-KEY": self.fugle_token}
             response = requests.get(url, params=params, headers=headers, timeout=10)
@@ -231,8 +243,12 @@ class PriceFetcher:
             
             # 1. 優先嘗試富果
             df = None
+            source_tag = "Unknown"
             if self.fugle_token:
-                df = self._get_fugle_historical(symbol, start_date_str, end_date_str)
+                fugle_symbol = symbol
+                if symbol == "^TWII" or symbol == "TAIEX":
+                    fugle_symbol = "IX0001"
+                df = self._get_fugle_historical(fugle_symbol, start_date_str, end_date_str)
                 if df is not None and not df.empty:
                      source_tag = "Fugle"
             
@@ -302,7 +318,10 @@ class PriceFetcher:
             # 1. 優先嘗試富果
             df = None
             if self.fugle_token:
-                df = self._get_fugle_historical(symbol, start_date_str, end_date_str)
+                fugle_symbol = symbol
+                if symbol == "^TWII" or symbol == "TAIEX":
+                    fugle_symbol = "IX0001"
+                df = self._get_fugle_historical(fugle_symbol, start_date_str, end_date_str)
             
             # 2. 如果富果失敗或未設定，嘗試 FinMind
             if df is None or df.empty:
@@ -553,6 +572,45 @@ class PriceFetcher:
             
             for name, symbol in tickers_map.items():
                 try:
+                    # 如果是台股加權且有富果 Token，優先嘗試富果
+                    if (symbol == "^TWII" or name == "🇹🇼 台股加權") and self.fugle_token:
+                        fugle_data = self._get_fugle_snapshot("IX0001")
+                        if fugle_data:
+                            # 獲取前一日收盤以計算漲跌 (Fugle snapshot v1.0 可能不含前收，需額外處理或用 yfinance 補齊)
+                            # 簡化作法：從歷史資料抓昨天
+                            prev_close = None
+                            try:
+                                # 抓最近兩天的數據
+                                now_dt = self._get_taipei_now()
+                                start_dt = (now_dt - timedelta(days=7)).strftime("%Y-%m-%d")
+                                end_dt = now_dt.strftime("%Y-%m-%d")
+                                hist_df = self._get_fugle_historical("IX0001", start_dt, end_dt)
+                                if hist_df is not None and len(hist_df) >= 2:
+                                    # 如果最後一筆是今天，前一筆就是昨天
+                                    if str(hist_df.iloc[-1].get('date')) == now_dt.strftime("%Y-%m-%d"):
+                                        prev_close = float(hist_df.iloc[-2]['close'])
+                                    else:
+                                        prev_close = float(hist_df.iloc[-1]['close'])
+                            except:
+                                pass
+                            
+                            price = fugle_data['price']
+                            if prev_close:
+                                change_pct = ((price - prev_close) / prev_close) * 100
+                            else:
+                                change_pct = 0 # 無法取得前收則設為 0
+                                
+                            emoji = "🔴" if change_pct > 0 else "🟢" if change_pct < 0 else "⚪"
+                            data_list.append({
+                                "name": name,
+                                "price": price,
+                                "change_pct": change_pct,
+                                "emoji": emoji,
+                                "source": "Fugle"
+                            })
+                            continue
+
+                    # yfinance 備援來源
                     ticker = yf.Ticker(symbol)
                     # 優先使用 fast_info 獲取即時價格
                     info = ticker.fast_info
