@@ -220,8 +220,9 @@ class PriceFetcher:
             yf_symbol = symbol
             if symbol == "TAIEX" or symbol == "^TWII" or symbol == "IX0001":
                 yf_symbol = "^TWII"
-            elif len(symbol) == 4 or len(symbol) == 5: # 台股代碼
-                if symbol.startswith('6') or symbol.startswith('8'): # 簡略判定上櫃
+            elif 4 <= len(symbol) <= 6: # 台股代碼 (包含 4 碼股票, 5 碼或 6 碼 ETF 如 00763U)
+                # 簡略判定：5, 6, 8 開頭大機率是上櫃 (TWO)，其餘 (含 00 開頭 ETF) 為上市 (TW)
+                if symbol.startswith(('5', '6', '8')):
                     yf_symbol = f"{symbol}.TWO"
                 else:
                     yf_symbol = f"{symbol}.TW"
