@@ -145,8 +145,10 @@ class PriceFetcher:
             response = requests.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
                 data = response.json()
-                # 富果 API v1.0 使用 camelCase: closePrice, lastPrice, openPrice...
-                price = data.get('lastPrice') or data.get('closePrice') or data.get('last_price') or data.get('close')
+                # 富果 API v1.0 使用 camelCase
+                # 股票常用: lastPrice, closePrice
+                # 指數常用: indexValue
+                price = data.get('indexValue') or data.get('lastPrice') or data.get('closePrice') or data.get('last_price') or data.get('close')
                 
                 print(f"🔍 [DEBUG] Fugle Snapshot ({symbol}): 獲取到價格={price} (API原始資料: {data})")
                 
