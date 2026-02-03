@@ -275,8 +275,8 @@ class Notifier:
             return
         
         try:
-            await update.message.reply_text("🔄 正在執行手動價格檢查...")
-            success, fail = await self.check_callback()
+            await update.message.reply_text("🔄 正在執行手動價格檢查 (強制更新數據)...")
+            success, fail = await self.check_callback(force=True)
             
             if success == 0 and fail == 0:
                 msg = "📝 監控清單為空，未執行檢查。"

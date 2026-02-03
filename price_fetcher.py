@@ -31,18 +31,24 @@ class PriceFetcher:
         tz = timezone(timedelta(hours=8))
         return datetime.now(tz)
 
-    def get_last_price(self, symbol):
+    def get_last_price(self, symbol, force=False):
         """
         獲取股票或權證的最新成交價 (支援快取)
         回傳: {"price": float, "time": str, "is_cached": bool} 或 None
         """
         from datetime import datetime, timedelta
         
+        # 指數類標的一律將快取時間縮短或在關鍵時點強刷
+        is_index = symbol.upper() in ["^TWII", "TAIEX", "加權指數"]
+        
         # 檢查快取
         now = self._get_taipei_now()
-        if symbol in self.price_cache:
+        if not force and symbol in self.price_cache:
             cache_data = self.price_cache[symbol]
-            if now.replace(tzinfo=None) - cache_data['time'].replace(tzinfo=None) < timedelta(seconds=self.cache_duration):
+            # 如果是指数，快取上限設為 30 秒；普通標的則依照設定 (預設 300 秒)
+            current_cache_limit = 30 if is_index else self.cache_duration
+            
+            if now.replace(tzinfo=None) - cache_data['time'].replace(tzinfo=None) < timedelta(seconds=current_cache_limit):
                 return {
                     "price": cache_data['price'],
                     "time": cache_data['time'].strftime("%H:%M:%S"),

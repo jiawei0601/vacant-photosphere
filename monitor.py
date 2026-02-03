@@ -53,7 +53,7 @@ class MarketMonitor:
         
         return market_start <= current_time <= market_end
 
-    async def check_once(self):
+    async def check_once(self, force=False):
         print(f"[{datetime.now()}] 開始執行價格檢查...")
         
         items = self.notion.get_monitoring_list()
@@ -66,7 +66,7 @@ class MarketMonitor:
         
         for item in items:
             symbol = item['symbol']
-            price_data = self.fetcher.get_last_price(symbol)
+            price_data = self.fetcher.get_last_price(symbol, force=force)
             
             if price_data is None:
                 fail_count += 1
