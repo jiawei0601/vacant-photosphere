@@ -200,7 +200,19 @@ class PriceFetcher:
             response = requests.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
                 data = response.json()
-                price = data.get('indexValue') or data.get('lastPrice') or data.get('closePrice')
+                
+                # 優先順序：1. lastTrade (最即時) 2. indexValue (指數) 3. lastPrice 4. closePrice
+                last_trade = data.get('lastTrade', {})
+                price = None
+                if isinstance(last_trade, dict) and last_trade.get('price'):
+                    price = last_trade['price']
+                
+                if not price:
+                    price = data.get('indexValue') or data.get('lastPrice') or data.get('closePrice')
+                
+                # DEBUG: 列印原始數據以排查延遲或落差原因 (僅於開發/排故時顯示)
+                print(f"🔍 [Fugle DEBUG] {symbol} Raw Price: {price}, Data: {data}")
+                
                 if price:
                     return {
                         "price": float(price),
