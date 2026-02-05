@@ -198,7 +198,7 @@ class PriceFetcher:
                 if not candles: return None
                 
                 df = pd.DataFrame(candles)
-                if 'volume' in df.columns: df = df.rename(columns={'volume': 'trading_volume'})
+                # 統一使用 volume 欄位
                 df.columns = [c.lower() for c in df.columns]
                 df['date'] = pd.to_datetime(df['date'])
                 df = df.sort_values('date').reset_index(drop=True)
@@ -221,7 +221,6 @@ class PriceFetcher:
             if df is None or df.empty:
                 yf_sym = self._get_yf_symbol(symbol)
                 ticker = yf.Ticker(yf_sym)
-                # 第一次嘗試 (靜音)
                 df = self._safe_history(ticker, period="50d")
                 
                 if df.empty and ".T" in yf_sym:
@@ -232,7 +231,6 @@ class PriceFetcher:
                     df = df.reset_index()
                     df.columns = [c.lower() for c in df.columns]
                     if 'date' in df.columns: df['date'] = df['date'].dt.strftime('%Y-%m-%d')
-                    if 'volume' in df.columns: df = df.rename(columns={'volume': 'trading_volume'})
             
             if df is None or df.empty: return None
             
@@ -263,19 +261,16 @@ class PriceFetcher:
             if df is None or df.empty:
                 yf_sym = self._get_yf_symbol(symbol)
                 ticker = yf.Ticker(yf_sym)
-                # 第一次嘗試 (靜音)
                 df = self._safe_history(ticker, period="80d")
                 
                 if df.empty and ".T" in yf_sym:
                     retry_sym = yf_sym.replace(".TW", ".TMP").replace(".TWO", ".TW").replace(".TMP", ".TWO")
-                    # 第二次嘗試 (顯示警告)
                     df = yf.Ticker(retry_sym).history(period="80d")
                 
                 if not df.empty:
                     df = df.reset_index()
                     df.columns = [c.lower() for c in df.columns]
                     if 'date' in df.columns: df['date'] = df['date'].dt.strftime('%Y-%m-%d')
-                    if 'volume' in df.columns: df = df.rename(columns={'volume': 'trading_volume'})
 
             if df is None or df.empty:
                 print(f"[{symbol}] 無法獲取歷史數據 (Fugle & Yahoo 皆失敗)")
@@ -307,7 +302,7 @@ class PriceFetcher:
                 "close": float(row['close']),
                 "high": float(row.get('high', row.get('max', 0))),
                 "low": float(row.get('low', row.get('min', 0))),
-                "volume": int(row.get('trading_volume', 0)),
+                "volume": int(row.get('volume', 0)),
                 "ma20": round(float(row['ma20']), 2) if not pd.isna(row['ma20']) else None,
                 "change_pct": change_pct
             }
