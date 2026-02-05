@@ -130,11 +130,13 @@ class MarketMonitor:
             total_buy = m_stats.get('total_buy_volume', 0)
             total_sell = m_stats.get('total_sell_volume', 0)
             diff_vol = total_buy - total_sell
+            # 過熱指數公式：累積成交數量 / 委託買進筆數
+            overheat_val = (m_stats.get('total_deal_volume',0) / m_stats.get('total_buy_order', 1))
             sentiment_data = {
                 "date": m_stats.get('date', date_str), "time": m_stats.get('time', '---'),
                 "sentiment": "🐂 偏多" if diff_vol > 0 else "🐻 偏空" if diff_vol < 0 else "⚪ 持平",
                 "diff_vol": diff_vol,
-                "overheat_index": (m_stats.get('total_deal_volume',0) / total_buy * 100) if total_buy > 0 else 0
+                "overheat_index": overheat_val
             }
         return {"date": date_str, "stock_list": stock_list, "sentiment": sentiment_data}
 

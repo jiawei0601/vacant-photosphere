@@ -101,7 +101,7 @@ class ReportGenerator:
         
         draw.text((70, 280), f"市場氣分: {sent}", font=body_font, fill=sent_color)
         draw.text((70, 335), f"買賣量差: {diff_vol:+,}", font=body_font, fill=self.text_color)
-        draw.text((70, 390), f"過熱指數: {overheat:.2f}%", font=body_font, fill=self.accent_color)
+        draw.text((70, 390), f"過熱指數: {overheat:,.0f}", font=body_font, fill=self.accent_color)
         
         # --- Stock List Title ---
         list_start_y = 500
