@@ -58,6 +58,9 @@ class ReportGenerator:
         sentiment_data: {date, sentiment, diff_vol, overheat_index}
         stock_list: list of {name, symbol, close, change_pct, ma20_status}
         """
+        if not sentiment_data:
+            sentiment_data = {"date": "---", "sentiment": "---", "diff_vol": 0, "overheat_index": 0}
+            
         # Canvas size - dynamic height
         row_height = 100
         header_height = 680
@@ -85,9 +88,6 @@ class ReportGenerator:
         # Shifted down following the date info
         draw.rounded_rectangle([40, 190, width-60, 460], radius=15, fill=self.card_color)
         draw.text((70, 215), "市場氣氛與買賣力道", font=subtitle_font, fill=self.text_color)
-        
-        if not sentiment_data:
-            sentiment_data = {"date": "---", "sentiment": "---", "diff_vol": 0, "overheat_index": 0}
         
         # Sentiment Info
         sent = sentiment_data.get('sentiment', '---')

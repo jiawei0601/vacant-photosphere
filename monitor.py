@@ -178,11 +178,16 @@ class MarketMonitor:
     async def test_report_callback(self, report_type):
         if report_type == "daily":
             data = await self.get_report_data(offset=0)
+            if not data['stock_list']:
+                await self.notifier.send_message("⚠️ 無法產生報表：目前監控清單為空或無法獲取任何資料。")
+                return False
             try:
                 path = self.generator.generate_closing_report(data['sentiment'], data['stock_list'])
-                await self.notifier.send_photo(path, caption="🔔 **[測試] 盤後綜合報告**")
+                await self.notifier.send_photo(path, caption="🔔 **盤後綜合報告 (手動測試)**")
                 return True
-            except: pass
+            except Exception as e:
+                print(f"Daily Report Error: {e}")
+                await self.notifier.send_message(f"❌ 報表產生失敗: {e}")
         return False
 
     async def run_monitor_loop(self):
