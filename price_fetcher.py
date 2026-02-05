@@ -143,24 +143,44 @@ class PriceFetcher:
             print(f"[{symbol}] yfinance Error: {e}")
             return None
 
+    def _normalize_fugle_symbol(self, symbol):
+        """標準化標的代碼以符合 Fugle API 要求"""
+        s = symbol.upper().split('.')[0] # 移除 .TW 或 .TWO
+        if s in ["TAIEX", "^TWII"]: return "IX0001"
+        return s
+
     def _get_fugle_historical(self, symbol, start_date, end_date):
-        """獲取富果歷史資料"""
+        """獲取富果歷史資料 (蠟燭線)"""
         if not self.fugle_token: return None
         try:
-            is_index = symbol.startswith("IX")
+            fugle_sym = self._normalize_fugle_symbol(symbol)
+            is_index = fugle_sym.startswith("IX")
             path_type = "index" if is_index else "stock"
-            url = f"https://api.fugle.tw/marketdata/v1.0/{path_type}/historical/candles/{symbol}"
+            
+            url = f"https://api.fugle.tw/marketdata/v1.0/{path_type}/historical/candles/{fugle_sym}"
             params = {"from": start_date, "to": end_date, "fields": "open,high,low,close,volume"}
             headers = {"X-API-KEY": self.fugle_token}
             response = requests.get(url, params=params, headers=headers, timeout=10)
+            
             if response.status_code == 200:
                 data = response.json()
                 candles = data.get('candles', [])
-                if not candles: return None
+                if not candles: 
+                    return None
+                
                 df = pd.DataFrame(candles)
-                df = df.rename(columns={'volume': 'trading_volume'})
+                if 'volume' in df.columns:
+                    df = df.rename(columns={'volume': 'trading_volume'})
+                
+                # 確保欄位全小寫
                 df.columns = [c.lower() for c in df.columns]
-                return df.iloc[::-1].reset_index(drop=True)
+                
+                # 關鍵修正：確保依日期由舊到新排序 (Ascending)
+                df['date'] = pd.to_datetime(df['date'])
+                df = df.sort_values('date').reset_index(drop=True)
+                df['date'] = df['date'].dt.strftime('%Y-%m-%d')
+                
+                return df
             return None
         except Exception as e:
             print(f"[{symbol}] Fugle Historical Error: {e}")
@@ -173,32 +193,47 @@ class PriceFetcher:
             end_date_str = now.strftime("%Y-%m-%d")
             start_date_str = (now - timedelta(days=40)).strftime("%Y-%m-%d")
             
-            fugle_sym = symbol
-            if symbol.upper() in ["TAIEX", "^TWII"]: fugle_sym = "IX0001"
+            df = self._get_fugle_historical(symbol, start_date_str, end_date_str)
             
-            df = self._get_fugle_historical(fugle_sym, start_date_str, end_date_str)
-            
-            if df is not None and not df.empty:
-                df.columns = [c.lower() for c in df.columns]
-                df['ma5'] = df['close'].rolling(window=5).mean()
-                df['ma20'] = df['close'].rolling(window=20).mean()
+            # 備援 yfinance
+            if df is None or df.empty:
+                yf_sym = symbol
+                if symbol == "TAIEX" or symbol == "^TWII": yf_sym = "^TWII"
+                elif '.' not in symbol and symbol.isdigit(): 
+                    yf_sym = f"{symbol}.TWO" if symbol.startswith(('5','6','8')) else f"{symbol}.TW"
                 
-                last_5_days = df.tail(5).copy()
-                stats_list = []
-                for _, row in last_5_days.iterrows():
-                    stats_list.append({
-                        "date": str(row.get('date', '未知')),
-                        "open": float(row.get('open', 0)),
-                        "close": float(row.get('close', 0)),
-                        "high": float(row.get('high', row.get('max', 0))),
-                        "low": float(row.get('low', row.get('min', 0))),
-                        "volume": int(row.get('trading_volume', row.get('volume', 0))),
-                        "ma5": round(float(row['ma5']), 2) if not pd.isna(row.get('ma5')) else None,
-                        "ma20": round(float(row['ma20']), 2) if not pd.isna(row.get('ma20')) else None,
-                        "fetch_time": now.strftime("%H:%M:%S")
-                    })
-                return stats_list
-            return None
+                ticker = yf.Ticker(yf_sym)
+                df = ticker.history(period="40d")
+                if not df.empty:
+                    df = df.reset_index()
+                    df.columns = [c.lower() for c in df.columns]
+                    if 'date' in df.columns:
+                        df['date'] = df['date'].dt.strftime('%Y-%m-%d')
+                    if 'volume' in df.columns:
+                        df = df.rename(columns={'volume': 'trading_volume'})
+            
+            if df is None or df.empty: return None
+            
+            # 計算 MA5, MA20
+            df['ma5'] = df['close'].rolling(window=5).mean()
+            df['ma20'] = df['close'].rolling(window=20).mean()
+            
+            # 取最後 5 筆
+            latest_rows = df.tail(5).copy()
+            stats_list = []
+            for _, row in latest_rows.iterrows():
+                stats_list.append({
+                    "date": str(row['date']),
+                    "open": float(row.get('open', 0)),
+                    "close": float(row['close']),
+                    "high": float(row.get('high', row.get('max', 0))),
+                    "low": float(row.get('low', row.get('min', 0))),
+                    "volume": int(row.get('trading_volume', 0)),
+                    "ma5": round(float(row['ma5']), 2) if not pd.isna(row['ma5']) else None,
+                    "ma20": round(float(row['ma20']), 2) if not pd.isna(row['ma20']) else None,
+                    "fetch_time": now.strftime("%H:%M:%S")
+                })
+            return stats_list
         except Exception as e:
             print(f"[{symbol}] get_five_day_stats Error: {e}")
             return None
@@ -208,18 +243,24 @@ class PriceFetcher:
         try:
             now = self._get_taipei_now()
             end_date_str = now.strftime("%Y-%m-%d")
-            start_date_str = (now - timedelta(days=60)).strftime("%Y-%m-%d")
+            start_date_str = (now - timedelta(days=window + 40)).strftime("%Y-%m-%d")
             
-            fugle_sym = symbol
-            if symbol.upper() in ["TAIEX", "^TWII"]: fugle_sym = "IX0001"
+            df = self._get_fugle_historical(symbol, start_date_str, end_date_str)
             
-            df = self._get_fugle_historical(fugle_sym, start_date_str, end_date_str)
+            # 備援 yfinance
             if df is None or df.empty:
-                # 備援 yfinance
-                ticker = yf.Ticker(symbol if symbol != "TAIEX" else "^TWII")
-                df = ticker.history(period="60d")
+                yf_sym = symbol
+                if symbol == "TAIEX" or symbol == "^TWII": yf_sym = "^TWII"
+                elif '.' not in symbol and symbol.isdigit():
+                    yf_sym = f"{symbol}.TWO" if symbol.startswith(('5','6','8')) else f"{symbol}.TW"
+                
+                ticker = yf.Ticker(yf_sym)
+                df = ticker.history(period=f"{window+40}d")
                 if not df.empty:
+                    df = df.reset_index()
                     df.columns = [c.lower() for c in df.columns]
+                    if 'date' in df.columns:
+                        df['date'] = df['date'].dt.strftime('%Y-%m-%d')
 
             if df is None or df.empty or len(df) < window:
                 return None, None
@@ -235,47 +276,71 @@ class PriceFetcher:
         try:
             now = self._get_taipei_now()
             end_date_str = now.strftime("%Y-%m-%d")
-            start_date_str = (now - timedelta(days=65)).strftime("%Y-%m-%d")
+            start_date_str = (now - timedelta(days=70)).strftime("%Y-%m-%d")
             
-            fugle_sym = symbol
-            if symbol == "TAIEX" or symbol == "^TWII": fugle_sym = "IX0001"
+            df = self._get_fugle_historical(symbol, start_date_str, end_date_str)
             
-            df = self._get_fugle_historical(fugle_sym, start_date_str, end_date_str)
-            
-            if df is not None and not df.empty:
-                df.columns = [c.lower() for c in df.columns]
+            # 備援 yfinance
+            if df is None or df.empty:
+                yf_sym = symbol
+                if symbol in ["TAIEX", "^TWII"]: yf_sym = "^TWII"
+                elif '.' not in symbol and symbol.isdigit():
+                    yf_sym = f"{symbol}.TWO" if symbol.startswith(('5','6','8')) else f"{symbol}.TW"
                 
-                if offset == 0 and 9 <= now.hour < 14:
-                    latest = self.get_last_price(symbol, force=True)
-                    if latest:
-                        today_str = now.strftime("%Y-%m-%d")
-                        if str(df.iloc[-1].get('date')) != today_str:
-                            new_row = df.iloc[-1].copy()
-                            new_row['date'] = today_str
-                            new_row['close'] = latest['price']
-                            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-                        else:
-                            df.at[df.index[-1], 'close'] = latest['price']
+                ticker = yf.Ticker(yf_sym)
+                df = ticker.history(period="70d")
+                if not df.empty:
+                    df = df.reset_index()
+                    df.columns = [c.lower() for c in df.columns]
+                    if 'date' in df.columns:
+                        df['date'] = df['date'].dt.strftime('%Y-%m-%d')
+                    if 'volume' in df.columns:
+                        df = df.rename(columns={'volume': 'trading_volume'})
 
-                df['ma20'] = df['close'].rolling(window=20).mean()
-                idx = -1 - offset
-                if abs(idx) > len(df): return None
+            if df is None or df.empty:
+                print(f"[{symbol}] 所有資料源均無法獲取歷史數據")
+                return None
+            
+            # 若為今日 (offset=0) 且在盤中，嘗試合併即時價格
+            if offset == 0 and 9 <= now.hour < 14:
+                latest = self.get_last_price(symbol, force=True)
+                if latest:
+                    today_str = now.strftime("%Y-%m-%d")
+                    if str(df.iloc[-1]['date']) != today_str:
+                        new_row = df.iloc[-1].copy()
+                        new_row['date'] = today_str
+                        new_row['close'] = latest['price']
+                        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+                    else:
+                        df.at[df.index[-1], 'close'] = latest['price']
+
+            df['ma20'] = df['close'].rolling(window=20).mean()
+            
+            target_idx = -1 - offset
+            if abs(target_idx) > len(df):
+                print(f"[{symbol}] 資料長度不足 (len={len(df)}, offset={offset})")
+                return None
+            
+            row = df.iloc[target_idx]
+            
+            # 計算漲跌幅 (與前一交易日比較)
+            prev_idx = target_idx - 1
+            if abs(prev_idx) <= len(df):
+                prev_close = float(df.iloc[prev_idx]['close'])
+                change_pct = round(((float(row['close']) - prev_close) / prev_close * 100), 2) if prev_close else 0
+            else:
+                change_pct = 0
                 
-                row = df.iloc[idx]
-                prev_close = float(df.iloc[idx-1]['close']) if abs(idx-1) <= len(df) else float(row['close'])
-                change_pct = ((float(row['close']) - prev_close) / prev_close * 100) if prev_close else 0
-                
-                return {
-                    "date": str(row.get('date')),
-                    "open": float(row.get('open', 0)),
-                    "close": float(row['close']),
-                    "high": float(row.get('high', row.get('max', 0))),
-                    "low": float(row.get('low', row.get('min', 0))),
-                    "volume": int(row.get('trading_volume', row.get('volume', 0))),
-                    "ma20": round(float(row.get('ma20', 0)), 2) if not pd.isna(row.get('ma20')) else None,
-                    "change_pct": round(change_pct, 2)
-                }
-            return None
+            return {
+                "date": str(row['date']),
+                "open": float(row.get('open', 0)),
+                "close": float(row['close']),
+                "high": float(row.get('high', row.get('max', 0))),
+                "low": float(row.get('low', row.get('min', 0))),
+                "volume": int(row.get('trading_volume', 0)),
+                "ma20": round(float(row['ma20']), 2) if not pd.isna(row['ma20']) else None,
+                "change_pct": change_pct
+            }
         except Exception as e:
             print(f"[{symbol}] get_full_stats Error: {e}")
             return None
