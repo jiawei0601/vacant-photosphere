@@ -358,32 +358,47 @@ class PriceFetcher:
         return results
 
     def get_market_order_stats(self):
-        """獲取大盤買賣力道 (透過 Fugle Snapshot Market)"""
-        if not self.fugle_token: return None
+        """
+        獲取大盤買賣力道 (優先從證交所官網抓取，最準確且不需 Token)
+        """
         try:
-            # 獲取上市大盤統計 (TSE)
-            # Fugle v1.0 支援 X-API-KEY Header，但也常建議 apiToken 作為 query param
-            url = f"https://api.fugle.tw/marketdata/v1.0/stock/snapshot/market/TSE"
-            headers = {"X-API-KEY": self.fugle_token}
-            params = {"apiToken": self.fugle_token} # 雙重保障
-            
-            response = requests.get(url, headers=headers, params=params, timeout=10)
-            if response.status_code == 200:
-                raw_data = response.json()
-                data = raw_data.get("data", {})
-                
-                # Fugle v1.0 正確欄位名稱是 buyVolume, sellVolume, tradeVolume
-                return {
-                    "time": raw_data.get("time", datetime.now().strftime("%H:%M:%S")),
-                    "date": raw_data.get("date", datetime.now().strftime("%Y-%m-%d")),
-                    "total_buy_order": data.get("buyCount", 0),
-                    "total_sell_order": data.get("sellCount", 0),
-                    "total_buy_volume": data.get("buyVolume", 0),
-                    "total_sell_volume": data.get("sellVolume", 0),
-                    "total_deal_volume": data.get("tradeVolume", 0),
-                }
-            print(f"Fugle Market Stats Error: Status {response.status_code}, {response.text}")
+            # 1. 嘗試證交所 MI_5MINS (每5秒委託成交統計)
+            twse_url = "https://www.twse.com.tw/zh/exchangeReport/MI_5MINS?response=json"
+            resp = requests.get(twse_url, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                if "data" in data and len(data["data"]) > 0:
+                    # 最後一筆紀錄通常是最新數據
+                    last_row = data["data"][-1]
+                    # 欄位順序: ["時間", "累積委託買進筆數", "累積委託買進數量", "累積委託賣出筆數", "累積委託賣出數量", "累積成交筆數", "累積成交數量", "累積成交金額"]
+                    return {
+                        "time": last_row[0],
+                        "date": datetime.now().strftime("%Y-%m-%d"),
+                        "total_buy_order": int(last_row[1].replace(",", "")),
+                        "total_buy_volume": int(last_row[2].replace(",", "")),
+                        "total_sell_volume": int(last_row[4].replace(",", "")),
+                        "total_deal_volume": int(last_row[6].replace(",", ""))
+                    }
+
+            # 2. 如果證交所失敗，則嘗試 Fugle (作為備援)
+            if self.fugle_token:
+                # 清理 Token 空格 (避免 Railway 變數帶入空格)
+                clean_token = self.fugle_token.replace(" ", "").strip()
+                url = f"https://api.fugle.tw/marketdata/v1.0/stock/snapshot/market/TSE"
+                params = {"apiToken": clean_token}
+                response = requests.get(url, params=params, timeout=10)
+                if response.status_code == 200:
+                    raw_data = response.json()
+                    data = raw_data.get("data", {})
+                    return {
+                        "time": raw_data.get("time", datetime.now().strftime("%H:%M:%S")),
+                        "date": raw_data.get("date", datetime.now().strftime("%Y-%m-%d")),
+                        "total_buy_order": data.get("buyCount", 0),
+                        "total_buy_volume": data.get("buyVolume", 0),
+                        "total_sell_volume": data.get("sellVolume", 0),
+                        "total_deal_volume": data.get("tradeVolume", 0),
+                    }
             return None
         except Exception as e:
-            print(f"Fugle Market Stats Exception: {e}")
+            print(f"Market Stats Error (TWSE/Fugle): {e}")
             return None
