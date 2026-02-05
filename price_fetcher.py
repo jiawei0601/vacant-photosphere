@@ -9,13 +9,24 @@ load_dotenv()
 
 class PriceFetcher:
     def __init__(self):
-        # 僅保留富果 API Token
+        # 強化 Token 抓取邏輯，支援 Railway 的各種命名方式 (如帶空格或下底線)
         self.fugle_token = (os.getenv("FUGLE_API_TOKEN") or 
                             os.getenv("富果API KEY") or 
                             os.getenv("富果API_KEY") or "").strip()
         
+        # 備用方案: 遍歷所有環境變數尋找包含 "FUGLE" 或 "富果" 的值
         if not self.fugle_token:
-            print("警告: 未設定 FUGLE_API_TOKEN，台股報價功能將受限")
+            for key, value in os.environ.items():
+                if "FUGLE" in key.upper() or "富果" in key:
+                    self.fugle_token = value.strip()
+                    print(f"DEBUG: 從環境變數 {key} 抓取到 Token")
+                    break
+        
+        if not self.fugle_token:
+            print("警告: 未設定 FUGLE_API_TOKEN，台股報價與大盤功能將受限")
+        else:
+            # 僅顯示前 4 碼與長度供除錯，不洩漏完整 Token
+            print(f"✅ Fugle Token 已載入 (長度: {len(self.fugle_token)}, 前綴: {self.fugle_token[:4]}...)")
             
         # 快取機制設定
         self.price_cache = {} # 格式: {symbol: {"price": float, "time": datetime, "source": str}}
@@ -351,23 +362,28 @@ class PriceFetcher:
         if not self.fugle_token: return None
         try:
             # 獲取上市大盤統計 (TSE)
-            url = "https://api.fugle.tw/marketdata/v1.0/stock/snapshot/market/TSE"
+            # Fugle v1.0 支援 X-API-KEY Header，但也常建議 apiToken 作為 query param
+            url = f"https://api.fugle.tw/marketdata/v1.0/stock/snapshot/market/TSE"
             headers = {"X-API-KEY": self.fugle_token}
-            response = requests.get(url, headers=headers, timeout=10)
+            params = {"apiToken": self.fugle_token} # 雙重保障
+            
+            response = requests.get(url, headers=headers, params=params, timeout=10)
             if response.status_code == 200:
-                data = response.json()
-                # 欄位解析: 
-                # totalBuyOrder, totalSellOrder, totalBuyVolume, totalSellVolume, totalDealVolume
+                raw_data = response.json()
+                data = raw_data.get("data", {})
+                
+                # Fugle v1.0 正確欄位名稱是 buyVolume, sellVolume, tradeVolume
                 return {
-                    "time": datetime.now().strftime("%H:%M:%S"),
-                    "date": datetime.now().strftime("%Y-%m-%d"),
-                    "total_buy_order": data.get("totalBuyOrder", 0),
-                    "total_sell_order": data.get("totalSellOrder", 0),
-                    "total_buy_volume": data.get("totalBuyVolume", 0),
-                    "total_sell_volume": data.get("totalSellVolume", 0),
-                    "total_deal_volume": data.get("totalDealVolume", 0),
+                    "time": raw_data.get("time", datetime.now().strftime("%H:%M:%S")),
+                    "date": raw_data.get("date", datetime.now().strftime("%Y-%m-%d")),
+                    "total_buy_order": data.get("buyCount", 0),
+                    "total_sell_order": data.get("sellCount", 0),
+                    "total_buy_volume": data.get("buyVolume", 0),
+                    "total_sell_volume": data.get("sellVolume", 0),
+                    "total_deal_volume": data.get("tradeVolume", 0),
                 }
+            print(f"Fugle Market Stats Error: Status {response.status_code}, {response.text}")
             return None
         except Exception as e:
-            print(f"Fugle Market Stats Error: {e}")
+            print(f"Fugle Market Stats Exception: {e}")
             return None

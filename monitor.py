@@ -86,7 +86,13 @@ class MarketMonitor:
         for item in items:
             symbol = item['symbol']
             price = item.get('current_price', '---')
-            line = f"• **{item['name']}** ({symbol})\n  價: `{price}` | 限: `{item['low_alert']} ~ {item['high_alert']}`"
+            # 格式化價格為 1 位小數
+            if isinstance(price, (int, float)):
+                price_str = f"{price:.1f}"
+            else:
+                price_str = str(price)
+                
+            line = f"• **{item['name']}** ({symbol})\n  價: `{price_str}` | 限: `{item['low_alert']} ~ {item['high_alert']}`"
             if self.notifier.is_stopped(symbol): line += " (已暫停)"
             lines.append(line)
         return "\n\n".join(lines)
@@ -115,15 +121,18 @@ class MarketMonitor:
                     "low": stats.get('low', 0), "volume": stats.get('volume', 0)
                 })
         
-        sentiment_data = None
+        sentiment_data = {
+            "date": date_str, "time": "---", "sentiment": "---", 
+            "diff_vol": 0, "overheat_index": 0
+        }
         m_stats = self.fetcher.get_market_order_stats()
         if m_stats:
             total_buy = m_stats.get('total_buy_volume', 0)
             total_sell = m_stats.get('total_sell_volume', 0)
             diff_vol = total_buy - total_sell
             sentiment_data = {
-                "date": m_stats.get('date', '---'), "time": m_stats.get('time', '---'),
-                "sentiment": "🐂 偏多" if diff_vol > 0 else "🐻 偏空",
+                "date": m_stats.get('date', date_str), "time": m_stats.get('time', '---'),
+                "sentiment": "🐂 偏多" if diff_vol > 0 else "🐻 偏空" if diff_vol < 0 else "⚪ 持平",
                 "diff_vol": diff_vol,
                 "overheat_index": (m_stats.get('total_deal_volume',0) / total_buy * 100) if total_buy > 0 else 0
             }
@@ -135,7 +144,8 @@ class MarketMonitor:
         lines = [f"📅 基準日期: `{data['date']}`\n"]
         for s in data['stock_list']:
             change_str = f"{'🔴' if s['change_pct']>0 else '🟢' if s['change_pct']<0 else '⚪'} {s['change_pct']}%"
-            lines.append(f"• **{s['name']}** ({s['symbol']})\n  收: `{s['close']}` ({change_str})\n  量: `{s['volume']:,}` / MA20: {s['ma20_status']}")
+            close_str = f"{s['close']:.1f}"
+            lines.append(f"• **{s['name']}** ({s['symbol']})\n  收: `{close_str}` ({change_str})\n  量: `{s['volume']:,}` / MA20: {s['ma20_status']}")
         return "\n".join(lines)
 
     async def change_config_callback(self, interval=None, allow_outside=None):
@@ -148,9 +158,13 @@ class MarketMonitor:
     async def get_stock_history_callback(self, symbol):
         stats_list = self.fetcher.get_five_day_stats(symbol)
         if not stats_list: return None
-        lines = [f"📈 **{symbol} 近 5 日數據 (Fugle)**\n"]
+        lines = [f"📈 **{symbol} 近 5 日數據 (Fugle/YF)**\n"]
         for s in stats_list:
-            lines.append(f"📅 `{s['date']}` 開:`{s['open']}` 收:`{s['close']}` 量:`{s['volume']:,}` MA20:`{s['ma20'] or '---'}`")
+            close_val = s['close']
+            close_str = f"{close_val:.1f}" if isinstance(close_val, (int, float)) else str(close_val)
+            ma20_val = s.get('ma20')
+            ma20_str = f"{ma20_val:.1f}" if isinstance(ma20_val, (int, float)) else "---"
+            lines.append(f"📅 `{s['date']}` 開:`{s['open']:.1f}` 收:`{close_str}` 量:`{s['volume']:,}` MA20:`{ma20_str}`")
         return "\n".join(lines)
 
     async def get_graphical_report_callback(self, offset=0):

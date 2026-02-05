@@ -82,7 +82,10 @@ class ReportGenerator:
         # Header
         draw.text((40, 40), f"台股每日盤後綜合報告", font=title_font, fill=self.accent_color)
         # Date info moved down to avoid overlap (Title is size 72)
-        draw.text((40, 130), f"日期: {sentiment_data.get('date', '---')} | 生成時間: {datetime.now().strftime('%H:%M')}", font=small_font, fill="#AAAAAA")
+        from datetime import timezone, timedelta
+        taipei_tz = timezone(timedelta(hours=8))
+        now_taipei = datetime.now(taipei_tz)
+        draw.text((40, 130), f"日期: {sentiment_data.get('date', '---')} | 生成時間: {now_taipei.strftime('%H:%M')}", font=small_font, fill="#AAAAAA")
         
         # --- Market Sentiment Card ---
         # Shifted down following the date info
@@ -124,7 +127,9 @@ class ReportGenerator:
             draw.text((60, curr_y+40), f"{stock['symbol']}", font=small_font, fill="#888888")
             
             # Price
-            draw.text((380, curr_y), f"{stock['close']}", font=body_font, fill=self.text_color)
+            close_val = stock['close']
+            close_str = f"{close_val:.1f}" if isinstance(close_val, (int, float)) else str(close_val)
+            draw.text((380, curr_y), close_str, font=body_font, fill=self.text_color)
             
             # Change %
             change_str = f"{stock['change_pct']:+.2f}%" if stock['change_pct'] is not None else "---"
@@ -263,11 +268,13 @@ class ReportGenerator:
             if i >= 5: break
             color = self.up_color if s['close'] >= s['open'] else self.down_color
             draw.text((60, curr_y), s['date'], font=small_font, fill="#FFFFFF")
-            draw.text((220, curr_y), f"{s['open']}", font=small_font, fill="#FFFFFF")
-            draw.text((380, curr_y), f"{s['high']}", font=small_font, fill="#FFFFFF")
-            draw.text((540, curr_y), f"{s['low']}", font=small_font, fill="#FFFFFF")
-            draw.text((700, curr_y), f"{s['close']}", font=small_font, fill=color)
-            draw.text((860, curr_y), f"{s.get('ma20', '---')}", font=small_font, fill="#FFFFFF")
+            draw.text((220, curr_y), f"{s['open']:.1f}", font=small_font, fill="#FFFFFF")
+            draw.text((380, curr_y), f"{s['high']:.1f}", font=small_font, fill="#FFFFFF")
+            draw.text((540, curr_y), f"{s['low']:.1f}", font=small_font, fill="#FFFFFF")
+            draw.text((700, curr_y), f"{s['close']:.1f}", font=small_font, fill=color)
+            ma20_val = s.get('ma20')
+            ma20_str = f"{ma20_val:.1f}" if isinstance(ma20_val, (int, float)) else "---"
+            draw.text((860, curr_y), ma20_str, font=small_font, fill="#FFFFFF")
 
         img.save(output_path)
         return output_path
