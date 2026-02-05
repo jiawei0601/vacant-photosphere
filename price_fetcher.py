@@ -117,30 +117,41 @@ class PriceFetcher:
 
     def _get_yf_symbol(self, symbol):
         """將標的轉換為 yfinance 格式，包含市場後綴判定"""
-        s = str(symbol).upper().split('.')[0]
+        s_input = str(symbol).upper()
+        # 若已包含完整後綴，直接回傳
+        if s_input.endswith((".TW", ".TWO", ".HK", ".US")):
+            return s_input
+            
+        s = s_input.split('.')[0]
         if s in ["TAIEX", "^TWII", "IX0001"]: return "^TWII"
         
-        # 判斷是否為台股/ETF 代碼 (開頭為數字)
+        # 判斷台股/ETF 代碼
         if s[0:1].isdigit():
-            # 簡易判定：5, 6, 8 開頭通常是 OTC (.TWO)
-            # 註：1815 也是 OTC，這裡加入嘗試機制更保險
-            if s.startswith(('5', '6', '8')):
+            # 簡易規則：
+            # 1. 長度為 5 或 6 且含有字母 (U/L/R...)，通常是 ETF，大多在上市 (.TW)
+            # 2. 5, 6, 8 開頭的 4 碼通常是上櫃 (.TWO)
+            # 3. 其他 4 碼 (1, 2, 3, 4, 9) 預設上市 (.TW)，若失敗會重試
+            if len(s) == 4 and s.startswith(('5', '6', '8')):
                 return f"{s}.TWO"
+            
+            # 部分 1xxx, 4xxx, 3xxx 也是上櫃 (如 1815, 3105)，預設先用 .TW 跑，失敗會換 .TWO
             return f"{s}.TW"
         return s
 
     def _get_yfinance_price(self, symbol):
-        """獲取 yfinance 價格 (含自動市場切換嘗試)"""
+        """獲獲 yfinance 即時價格 (含自動市場切換)"""
         try:
             yf_sym = self._get_yf_symbol(symbol)
             
             def fetch(sym):
                 ticker = yf.Ticker(sym)
                 try:
+                    # 使用 fast_info 效率較高
                     info = ticker.fast_info
                     if 'last_price' in info and info['last_price'] > 0:
                         return float(info['last_price'])
                 except: pass
+                # 備援：抓取今日 K 線
                 h = ticker.history(period="1d", interval="1m")
                 return float(h['Close'].iloc[-1]) if not h.empty else None
 
@@ -150,7 +161,7 @@ class PriceFetcher:
                 price = fetch(retry_sym)
             return price
         except Exception as e:
-            print(f"[{symbol}] yfinance Error: {e}")
+            # 僅在完全失敗時印出
             return None
 
     def _normalize_fugle_symbol(self, symbol):
@@ -158,6 +169,15 @@ class PriceFetcher:
         s = str(symbol).upper().split('.')[0]
         if s in ["TAIEX", "^TWII"]: return "IX0001"
         return s
+
+    def _safe_history(self, ticker, **kwargs):
+        """安靜地獲取歷史資料，防止 stderr 輸出雜訊"""
+        import contextlib, io
+        with contextlib.redirect_stderr(io.StringIO()):
+            try:
+                return ticker.history(**kwargs)
+            except:
+                return pd.DataFrame()
 
     def _get_fugle_historical(self, symbol, start_date, end_date):
         """獲取富果歷史資料 (蠟燭線)"""
@@ -185,8 +205,7 @@ class PriceFetcher:
                 df['date'] = df['date'].dt.strftime('%Y-%m-%d')
                 return df
             return None
-        except Exception as e:
-            print(f"[{symbol}] Fugle Historical Error: {e}")
+        except:
             return None
 
     def get_five_day_stats(self, symbol):
@@ -198,14 +217,16 @@ class PriceFetcher:
             
             df = self._get_fugle_historical(symbol, start_date, end_date)
             
-            # yfinance 備援 (含市場自動偵測)
+            # yfinance 備援
             if df is None or df.empty:
                 yf_sym = self._get_yf_symbol(symbol)
                 ticker = yf.Ticker(yf_sym)
-                df = ticker.history(period="50d")
+                # 第一次嘗試 (靜音)
+                df = self._safe_history(ticker, period="50d")
+                
                 if df.empty and ".T" in yf_sym:
-                    yf_sym = yf_sym.replace(".TW", ".TMP").replace(".TWO", ".TW").replace(".TMP", ".TWO")
-                    df = yf.Ticker(yf_sym).history(period="50d")
+                    retry_sym = yf_sym.replace(".TW", ".TMP").replace(".TWO", ".TW").replace(".TMP", ".TWO")
+                    df = yf.Ticker(retry_sym).history(period="50d")
                 
                 if not df.empty:
                     df = df.reset_index()
@@ -218,8 +239,7 @@ class PriceFetcher:
             df['ma5'] = df['close'].rolling(window=5).mean()
             df['ma20'] = df['close'].rolling(window=20).mean()
             return df.tail(5).to_dict('records')
-        except Exception as e:
-            print(f"[{symbol}] get_five_day_stats Error: {e}")
+        except:
             return None
 
     def get_ticker_ma(self, symbol, window=20):
@@ -239,14 +259,17 @@ class PriceFetcher:
             
             df = self._get_fugle_historical(symbol, start_date, end_date)
             
-            # yfinance 備援 (含自動 .TW/.TWO 偵測)
+            # yfinance 備援
             if df is None or df.empty:
                 yf_sym = self._get_yf_symbol(symbol)
                 ticker = yf.Ticker(yf_sym)
-                df = ticker.history(period="80d")
+                # 第一次嘗試 (靜音)
+                df = self._safe_history(ticker, period="80d")
+                
                 if df.empty and ".T" in yf_sym:
-                    yf_sym = yf_sym.replace(".TW", ".TMP").replace(".TWO", ".TW").replace(".TMP", ".TWO")
-                    df = yf.Ticker(yf_sym).history(period="80d")
+                    retry_sym = yf_sym.replace(".TW", ".TMP").replace(".TWO", ".TW").replace(".TMP", ".TWO")
+                    # 第二次嘗試 (顯示警告)
+                    df = yf.Ticker(retry_sym).history(period="80d")
                 
                 if not df.empty:
                     df = df.reset_index()
@@ -255,7 +278,7 @@ class PriceFetcher:
                     if 'volume' in df.columns: df = df.rename(columns={'volume': 'trading_volume'})
 
             if df is None or df.empty:
-                print(f"[{symbol}] 警告: 無法獲取歷史數據 (Fugle & Yahoo 皆失敗)")
+                print(f"[{symbol}] 無法獲取歷史數據 (Fugle & Yahoo 皆失敗)")
                 return None
 
             # 今日盤中數據合併
@@ -289,7 +312,6 @@ class PriceFetcher:
                 "change_pct": change_pct
             }
         except Exception as e:
-            print(f"[{symbol}] get_full_stats Error: {e}")
             return None
 
     def get_market_indices(self):
