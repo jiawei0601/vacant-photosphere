@@ -151,8 +151,8 @@ class PriceFetcher:
                     if 'last_price' in info and info['last_price'] > 0:
                         return float(info['last_price'])
                 except: pass
-                # 備援：抓取今日 K 線
-                h = ticker.history(period="1d", interval="1m")
+                # 備援：抓取今日 K 線 (使用 safe_history 靜音)
+                h = self._safe_history(ticker, period="1d", interval="1m")
                 return float(h['Close'].iloc[-1]) if not h.empty else None
 
             price = fetch(yf_sym)
