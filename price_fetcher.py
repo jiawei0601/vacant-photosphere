@@ -232,7 +232,8 @@ class PriceFetcher:
             yf_symbol = symbol
             if symbol == "TAIEX" or symbol == "^TWII" or symbol == "IX0001":
                 yf_symbol = "^TWII"
-            elif 4 <= len(symbol) <= 6: # 台股代碼 (包含 4 碼股票, 5 碼或 6 碼 ETF 如 00763U)
+            elif 4 <= len(symbol) <= 6 and not any(c in symbol for c in ['^', '=', '-', '.']): 
+                # 台股代碼判斷：僅限純數字或特定台股格式，排除已含特殊符號的標的
                 # 簡略判定：5, 6, 8 開頭大機率是上櫃 (TWO)，其餘 (含 00 開頭 ETF) 為上市 (TW)
                 if symbol.startswith(('5', '6', '8')):
                     yf_symbol = f"{symbol}.TWO"
@@ -241,14 +242,22 @@ class PriceFetcher:
             
             ticker = yf.Ticker(yf_symbol)
             # 使用 fast_info
-            info = ticker.fast_info
-            if 'last_price' in info and info['last_price']:
-                return float(info['last_price'])
+            try:
+                info = ticker.fast_info
+                if 'last_price' in info and info['last_price'] and info['last_price'] > 0:
+                    return float(info['last_price'])
+            except: pass
             
-            # 備援: history
-            hist = ticker.history(period="1d", interval="1m")
+            # 備援: history (擴大範圍至 5d 以應對長假或週末)
+            hist = ticker.history(period="5d", interval="1m")
             if not hist.empty:
                 return float(hist['Close'].iloc[-1])
+            
+            # 再備援: 僅取收盤價
+            hist_daily = ticker.history(period="5d")
+            if not hist_daily.empty:
+                return float(hist_daily['Close'].iloc[-1])
+            
             return None
         except Exception as e:
             print(f"[{symbol}] yfinance Error: {e}")
