@@ -183,12 +183,15 @@ class MarketMonitor:
         sentiment_data = None
         m_stats = self.fetcher.get_market_order_stats()
         if m_stats:
-            diff_vol = m_stats['total_buy_volume'] - m_stats['total_sell_volume']
-            sentiment = "🐂 偏多" if diff_vol > 0 else "Bearish" # Placeholder logic, will refine in monitor
-            overheat_index = (m_stats['total_deal_volume'] / m_stats['total_buy_volume']) * 100 if m_stats['total_buy_volume'] > 0 else 0
+            total_buy = m_stats.get('total_buy_volume', 0)
+            total_sell = m_stats.get('total_sell_volume', 0)
+            total_deal = m_stats.get('total_deal_volume', 0)
+            
+            diff_vol = total_buy - total_sell
+            overheat_index = (total_deal / total_buy) * 100 if total_buy > 0 else 0
             sentiment_data = {
-                "date": m_stats['date'],
-                "time": m_stats['time'],
+                "date": m_stats.get('date', '---'),
+                "time": m_stats.get('time', '---'),
                 "sentiment": "🐂 偏多" if diff_vol > 0 else "🐻 偏空",
                 "diff_vol": diff_vol,
                 "overheat_index": overheat_index

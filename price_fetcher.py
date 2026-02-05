@@ -409,6 +409,7 @@ class PriceFetcher:
                         "total_sell_order": int(row.get("totalsellorder", 0)),
                         "total_buy_volume": int(row.get("totalbuyvolume", 0)),
                         "total_sell_volume": int(row.get("totalsellvolume", 0)),
+                        "total_deal_volume": int(row.get("totaldealvolume", 0)),
                     }
             return None
         except Exception as e:
