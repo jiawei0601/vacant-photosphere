@@ -115,37 +115,47 @@ class PriceFetcher:
             print(f"[{symbol}] Fugle Snapshot Error: {e}")
             return None
 
+    def _get_yf_symbol(self, symbol):
+        """將標的轉換為 yfinance 格式，包含市場後綴判定"""
+        s = str(symbol).upper().split('.')[0]
+        if s in ["TAIEX", "^TWII", "IX0001"]: return "^TWII"
+        
+        # 判斷是否為台股/ETF 代碼 (開頭為數字)
+        if s[0:1].isdigit():
+            # 簡易判定：5, 6, 8 開頭通常是 OTC (.TWO)
+            # 註：1815 也是 OTC，這裡加入嘗試機制更保險
+            if s.startswith(('5', '6', '8')):
+                return f"{s}.TWO"
+            return f"{s}.TW"
+        return s
+
     def _get_yfinance_price(self, symbol):
-        """獲取 yfinance 價格"""
+        """獲取 yfinance 價格 (含自動市場切換嘗試)"""
         try:
-            yf_symbol = symbol
-            if symbol in ["TAIEX", "^TWII", "IX0001"]:
-                yf_symbol = "^TWII"
-            elif 4 <= len(symbol) <= 6 and not any(c in symbol for c in ['^', '=', '-', '.']): 
-                if symbol.startswith(('5', '6', '8')):
-                    yf_symbol = f"{symbol}.TWO"
-                else:
-                    yf_symbol = f"{symbol}.TW"
+            yf_sym = self._get_yf_symbol(symbol)
             
-            ticker = yf.Ticker(yf_symbol)
-            try:
-                info = ticker.fast_info
-                if 'last_price' in info and info['last_price'] > 0:
-                    return float(info['last_price'])
-            except: pass
-            
-            hist = ticker.history(period="5d", interval="1m")
-            if not hist.empty:
-                return float(hist['Close'].iloc[-1])
-            
-            return None
+            def fetch(sym):
+                ticker = yf.Ticker(sym)
+                try:
+                    info = ticker.fast_info
+                    if 'last_price' in info and info['last_price'] > 0:
+                        return float(info['last_price'])
+                except: pass
+                h = ticker.history(period="1d", interval="1m")
+                return float(h['Close'].iloc[-1]) if not h.empty else None
+
+            price = fetch(yf_sym)
+            if price is None and ".T" in yf_sym:
+                retry_sym = yf_sym.replace(".TW", ".TMP").replace(".TWO", ".TW").replace(".TMP", ".TWO")
+                price = fetch(retry_sym)
+            return price
         except Exception as e:
             print(f"[{symbol}] yfinance Error: {e}")
             return None
 
     def _normalize_fugle_symbol(self, symbol):
         """標準化標的代碼以符合 Fugle API 要求"""
-        s = symbol.upper().split('.')[0] # 移除 .TW 或 .TWO
+        s = str(symbol).upper().split('.')[0]
         if s in ["TAIEX", "^TWII"]: return "IX0001"
         return s
 
@@ -165,21 +175,14 @@ class PriceFetcher:
             if response.status_code == 200:
                 data = response.json()
                 candles = data.get('candles', [])
-                if not candles: 
-                    return None
+                if not candles: return None
                 
                 df = pd.DataFrame(candles)
-                if 'volume' in df.columns:
-                    df = df.rename(columns={'volume': 'trading_volume'})
-                
-                # 確保欄位全小寫
+                if 'volume' in df.columns: df = df.rename(columns={'volume': 'trading_volume'})
                 df.columns = [c.lower() for c in df.columns]
-                
-                # 關鍵修正：確保依日期由舊到新排序 (Ascending)
                 df['date'] = pd.to_datetime(df['date'])
                 df = df.sort_values('date').reset_index(drop=True)
                 df['date'] = df['date'].dt.strftime('%Y-%m-%d')
-                
                 return df
             return None
         except Exception as e:
@@ -190,146 +193,90 @@ class PriceFetcher:
         """獲取近五日歷史數據摘要"""
         try:
             now = self._get_taipei_now()
-            end_date_str = now.strftime("%Y-%m-%d")
-            start_date_str = (now - timedelta(days=40)).strftime("%Y-%m-%d")
+            end_date = now.strftime("%Y-%m-%d")
+            start_date = (now - timedelta(days=50)).strftime("%Y-%m-%d")
             
-            df = self._get_fugle_historical(symbol, start_date_str, end_date_str)
+            df = self._get_fugle_historical(symbol, start_date, end_date)
             
-            # 備援 yfinance
+            # yfinance 備援 (含市場自動偵測)
             if df is None or df.empty:
-                yf_sym = symbol
-                if symbol == "TAIEX" or symbol == "^TWII": yf_sym = "^TWII"
-                elif '.' not in symbol and symbol.isdigit(): 
-                    yf_sym = f"{symbol}.TWO" if symbol.startswith(('5','6','8')) else f"{symbol}.TW"
-                
+                yf_sym = self._get_yf_symbol(symbol)
                 ticker = yf.Ticker(yf_sym)
-                df = ticker.history(period="40d")
+                df = ticker.history(period="50d")
+                if df.empty and ".T" in yf_sym:
+                    yf_sym = yf_sym.replace(".TW", ".TMP").replace(".TWO", ".TW").replace(".TMP", ".TWO")
+                    df = yf.Ticker(yf_sym).history(period="50d")
+                
                 if not df.empty:
                     df = df.reset_index()
                     df.columns = [c.lower() for c in df.columns]
-                    if 'date' in df.columns:
-                        df['date'] = df['date'].dt.strftime('%Y-%m-%d')
-                    if 'volume' in df.columns:
-                        df = df.rename(columns={'volume': 'trading_volume'})
+                    if 'date' in df.columns: df['date'] = df['date'].dt.strftime('%Y-%m-%d')
+                    if 'volume' in df.columns: df = df.rename(columns={'volume': 'trading_volume'})
             
             if df is None or df.empty: return None
             
-            # 計算 MA5, MA20
             df['ma5'] = df['close'].rolling(window=5).mean()
             df['ma20'] = df['close'].rolling(window=20).mean()
-            
-            # 取最後 5 筆
-            latest_rows = df.tail(5).copy()
-            stats_list = []
-            for _, row in latest_rows.iterrows():
-                stats_list.append({
-                    "date": str(row['date']),
-                    "open": float(row.get('open', 0)),
-                    "close": float(row['close']),
-                    "high": float(row.get('high', row.get('max', 0))),
-                    "low": float(row.get('low', row.get('min', 0))),
-                    "volume": int(row.get('trading_volume', 0)),
-                    "ma5": round(float(row['ma5']), 2) if not pd.isna(row['ma5']) else None,
-                    "ma20": round(float(row['ma20']), 2) if not pd.isna(row['ma20']) else None,
-                    "fetch_time": now.strftime("%H:%M:%S")
-                })
-            return stats_list
+            return df.tail(5).to_dict('records')
         except Exception as e:
             print(f"[{symbol}] get_five_day_stats Error: {e}")
             return None
 
     def get_ticker_ma(self, symbol, window=20):
-        """獲取特定代碼的移動平均線"""
+        """獲取移動平均線"""
         try:
-            now = self._get_taipei_now()
-            end_date_str = now.strftime("%Y-%m-%d")
-            start_date_str = (now - timedelta(days=window + 40)).strftime("%Y-%m-%d")
-            
-            df = self._get_fugle_historical(symbol, start_date_str, end_date_str)
-            
-            # 備援 yfinance
-            if df is None or df.empty:
-                yf_sym = symbol
-                if symbol == "TAIEX" or symbol == "^TWII": yf_sym = "^TWII"
-                elif '.' not in symbol and symbol.isdigit():
-                    yf_sym = f"{symbol}.TWO" if symbol.startswith(('5','6','8')) else f"{symbol}.TW"
-                
-                ticker = yf.Ticker(yf_sym)
-                df = ticker.history(period=f"{window+40}d")
-                if not df.empty:
-                    df = df.reset_index()
-                    df.columns = [c.lower() for c in df.columns]
-                    if 'date' in df.columns:
-                        df['date'] = df['date'].dt.strftime('%Y-%m-%d')
-
-            if df is None or df.empty or len(df) < window:
-                return None, None
-            
-            df['ma'] = df['close'].rolling(window=window).mean()
-            return round(float(df['close'].iloc[-1]), 2), round(float(df['ma'].iloc[-1]), 2)
-        except Exception as e:
-            print(f"[{symbol}] get_ticker_ma Error: {e}")
+            stats = self.get_full_stats(symbol, offset=0)
+            if stats: return stats['close'], stats['ma20']
             return None, None
+        except: return None, None
 
     def get_full_stats(self, symbol, offset=0):
-        """獲取完整統計資訊 (含 MA20)"""
+        """獲取完整統計資訊 (含多源備援與市場修正)"""
         try:
             now = self._get_taipei_now()
-            end_date_str = now.strftime("%Y-%m-%d")
-            start_date_str = (now - timedelta(days=70)).strftime("%Y-%m-%d")
+            end_date = now.strftime("%Y-%m-%d")
+            start_date = (now - timedelta(days=80)).strftime("%Y-%m-%d")
             
-            df = self._get_fugle_historical(symbol, start_date_str, end_date_str)
+            df = self._get_fugle_historical(symbol, start_date, end_date)
             
-            # 備援 yfinance
+            # yfinance 備援 (含自動 .TW/.TWO 偵測)
             if df is None or df.empty:
-                yf_sym = symbol
-                if symbol in ["TAIEX", "^TWII"]: yf_sym = "^TWII"
-                elif '.' not in symbol and symbol.isdigit():
-                    yf_sym = f"{symbol}.TWO" if symbol.startswith(('5','6','8')) else f"{symbol}.TW"
-                
+                yf_sym = self._get_yf_symbol(symbol)
                 ticker = yf.Ticker(yf_sym)
-                df = ticker.history(period="70d")
+                df = ticker.history(period="80d")
+                if df.empty and ".T" in yf_sym:
+                    yf_sym = yf_sym.replace(".TW", ".TMP").replace(".TWO", ".TW").replace(".TMP", ".TWO")
+                    df = yf.Ticker(yf_sym).history(period="80d")
+                
                 if not df.empty:
                     df = df.reset_index()
                     df.columns = [c.lower() for c in df.columns]
-                    if 'date' in df.columns:
-                        df['date'] = df['date'].dt.strftime('%Y-%m-%d')
-                    if 'volume' in df.columns:
-                        df = df.rename(columns={'volume': 'trading_volume'})
+                    if 'date' in df.columns: df['date'] = df['date'].dt.strftime('%Y-%m-%d')
+                    if 'volume' in df.columns: df = df.rename(columns={'volume': 'trading_volume'})
 
             if df is None or df.empty:
-                print(f"[{symbol}] 所有資料源均無法獲取歷史數據")
+                print(f"[{symbol}] 警告: 無法獲取歷史數據 (Fugle & Yahoo 皆失敗)")
                 return None
-            
-            # 若為今日 (offset=0) 且在盤中，嘗試合併即時價格
+
+            # 今日盤中數據合併
             if offset == 0 and 9 <= now.hour < 14:
                 latest = self.get_last_price(symbol, force=True)
                 if latest:
                     today_str = now.strftime("%Y-%m-%d")
                     if str(df.iloc[-1]['date']) != today_str:
                         new_row = df.iloc[-1].copy()
-                        new_row['date'] = today_str
-                        new_row['close'] = latest['price']
+                        new_row['date'], new_row['close'] = today_str, latest['price']
                         df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                     else:
                         df.at[df.index[-1], 'close'] = latest['price']
 
             df['ma20'] = df['close'].rolling(window=20).mean()
+            idx = -1 - offset
+            if abs(idx) > len(df): return None
             
-            target_idx = -1 - offset
-            if abs(target_idx) > len(df):
-                print(f"[{symbol}] 資料長度不足 (len={len(df)}, offset={offset})")
-                return None
-            
-            row = df.iloc[target_idx]
-            
-            # 計算漲跌幅 (與前一交易日比較)
-            prev_idx = target_idx - 1
-            if abs(prev_idx) <= len(df):
-                prev_close = float(df.iloc[prev_idx]['close'])
-                change_pct = round(((float(row['close']) - prev_close) / prev_close * 100), 2) if prev_close else 0
-            else:
-                change_pct = 0
+            row = df.iloc[idx]
+            prev_close = float(df.iloc[idx-1]['close']) if abs(idx-1) <= len(df) else float(row['close'])
+            change_pct = round(((float(row['close']) - prev_close) / prev_close * 100), 2) if prev_close else 0
                 
             return {
                 "date": str(row['date']),
