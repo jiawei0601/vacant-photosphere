@@ -136,7 +136,7 @@ class MarketMonitor:
                 "date": m_stats.get('date', date_str), "time": m_stats.get('time', '---'),
                 "sentiment": "🐂 偏多" if diff_vol > 0 else "🐻 偏空" if diff_vol < 0 else "⚪ 持平",
                 "diff_vol": diff_vol,
-                "overheat_index": overheat_val
+                "overheat_index": round(overheat_val, 2)
             }
         return {"date": date_str, "stock_list": stock_list, "sentiment": sentiment_data}
 
