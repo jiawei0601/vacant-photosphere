@@ -2,13 +2,8 @@ notion-client
 python-dotenv
 requests
 python-telegram-bot[job-queue]
-FinMind
-httpx
 pandas
-tqdm
 yfinance
 matplotlib
 Pillow
-google-cloud-vision
-opencv-python-headless
 numpy
