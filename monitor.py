@@ -170,13 +170,13 @@ class MarketMonitor:
                 stock_list.append({
                     "name": item['name'],
                     "symbol": symbol,
-                    "close": stats['close'],
-                    "change_pct": stats['change_pct'],
+                    "close": stats.get('close', 0),
+                    "change_pct": stats.get('change_pct', 0),
                     "ma20_status": ma_status,
-                    "open": stats['open'],
-                    "high": stats['high'],
-                    "low": stats['low'],
-                    "volume": stats['volume']
+                    "open": stats.get('open', 0),
+                    "high": stats.get('high', 0),
+                    "low": stats.get('low', 0),
+                    "volume": stats.get('volume', 0)
                 })
         
         # 獲取市場買賣力道

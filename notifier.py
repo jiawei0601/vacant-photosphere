@@ -31,6 +31,7 @@ class Notifier:
             self.app.add_handler(CommandHandler("showlist", self._show_list_command))
             self.app.add_handler(CommandHandler("market", self._market_command))
             self.app.add_handler(CommandHandler("check", self._check_command)) # New command
+            self.app.add_handler(CommandHandler("daily", self._daily_command)) # New command shortcut
             self.app.add_handler(CommandHandler("apicheck", self._api_usage_command)) # New command
             self.app.add_handler(CommandHandler("test", self._test_command)) # New command for testing
             self.app.add_handler(CommandHandler("sync", self._sync_command)) # New command
@@ -70,6 +71,7 @@ class Notifier:
                 "📋 **監控與報告**\n"
                 "• `/show` - 顯示目前所有監控中的標的報價清單\n"
                 "• `/showlist` - 顯示目前所有追蹤標的與警報上下限\n"
+                "• `/daily` - 立即產生今日監控標的收盤總結報告\n"
                 "• `/prev` - 顯示前一交易日的完整盤後總結報告\n"
                 "• `/sync` - **[New]** 從富邦 API 自動同步最新庫存 (需先配置)\n"
                 "• `/alist` - 顯示目前「已暫停警報」的標的清單\n\n"
@@ -462,6 +464,17 @@ class Notifier:
         success = await self.test_callback(action)
         if not success:
             await update.message.reply_text(f"❌ 測試報告生成失敗，請檢查類別名稱或 API 狀態。")
+
+    async def _daily_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """手動觸發每日報告的捷徑"""
+        if not self.test_callback:
+            await update.message.reply_text("系統尚未準備好。")
+            return
+            
+        await update.message.reply_text("📊 正在產生今日監控標的收盤總結報告...")
+        success = await self.test_callback("daily")
+        if not success:
+            await update.message.reply_text("❌ 報告生成失敗。這可能是因為未開盤、資料不足或 API 限制。")
 
     async def _photo_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """處理接收到的圖片，進行 OCR 辨識"""
