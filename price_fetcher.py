@@ -42,14 +42,16 @@ class PriceFetcher:
         獲取股票或權證的最新成交價 (優先富果)
         回傳: {"price": float, "time": str, "is_cached": bool, "source": str}
         """
-        orig_symbol = str(symbol).upper()
+        if not symbol: return None
+        orig_symbol = str(symbol).upper().strip()
+        
         # 指數代碼對應
         is_tw_index = orig_symbol in ["^TWII", "TAIEX", "加權指數", "IX0001"]
         
         # 檢查快取
         now = self._get_taipei_now()
-        if not force and symbol in self.price_cache:
-            cache_data = self.price_cache[symbol]
+        if not force and orig_symbol in self.price_cache:
+            cache_data = self.price_cache[orig_symbol]
             current_cache_limit = 30 if is_tw_index else self.cache_duration
             
             if now.replace(tzinfo=None) - cache_data['time'].replace(tzinfo=None) < timedelta(seconds=current_cache_limit):
@@ -62,15 +64,18 @@ class PriceFetcher:
 
         # 1. 優先嘗試富果 Fugle (台股標的)
         if self.fugle_token:
+            import re
+            # 台股代碼規則: 4-6位數字 + 選用大寫字母 (如 2330, 00763U)
+            # 使用 search 較寬鬆，並支援更多特殊 ETF 代碼
+            is_taiwan = bool(re.search(r'^\d{4,7}[A-Z0-9]?$', orig_symbol))
             fugle_symbol = orig_symbol
             if is_tw_index:
                 fugle_symbol = "IX0001"
             
-            # 如果是台股代碼 (純數字 4-6 碼) 或已指定 IX 代碼
-            if (orig_symbol.isdigit() and 4 <= len(orig_symbol) <= 6) or is_tw_index or "00" in orig_symbol:
+            if is_taiwan or is_tw_index:
                 fugle_data = self._get_fugle_snapshot(fugle_symbol)
                 if fugle_data:
-                    self.price_cache[symbol] = {
+                    self.price_cache[orig_symbol] = {
                         "price": fugle_data['price'],
                         "time": now,
                         "source": "Fugle"
@@ -80,7 +85,7 @@ class PriceFetcher:
         # 2. 第二備援/國際標的：yfinance
         yf_price = self._get_yfinance_price(orig_symbol)
         if yf_price:
-            self.price_cache[symbol] = {
+            self.price_cache[orig_symbol] = {
                 "price": yf_price,
                 "time": now,
                 "source": "yfinance"
@@ -92,67 +97,64 @@ class PriceFetcher:
                 "source": "yfinance"
             }
 
-        print(f"[{symbol}] 報價獲取失敗 (Fugle & yfinance 皆無資料)。")
+        print(f"[{orig_symbol}] 報價獲取失敗 (已嘗試 Fugle & yfinance)。")
         return None
 
     def _get_fugle_snapshot(self, symbol):
-        """獲取富果行情快照"""
+        """獲取富果行情快照 (使用 intraday/quote)"""
         if not self.fugle_token: return None
         try:
-            is_index = symbol.startswith("IX")
-            path_type = "index" if is_index else "stock"
-            url = f"https://api.fugle.tw/marketdata/v1.0/{path_type}/snapshot/{symbol}"
-            headers = {"X-API-KEY": self.fugle_token}
-            response = requests.get(url, headers=headers, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                
-                # 優先順序：1. lastTrade (撮合) 2. indexValue (指數) 3. 各種價格欄位
-                last_trade = data.get('lastTrade', {})
-                price = None
-                
-                if isinstance(last_trade, dict):
-                    price = last_trade.get('price')
-                
-                if not price:
-                    # 嘗試所有可能的價格欄位
-                    price = (data.get('indexValue') or 
-                             data.get('lastPrice') or 
-                             data.get('closePrice') or 
-                             data.get('price') or
+            # 去除可能帶有的市場後綴，Fugle 不需要
+            s = str(symbol).upper().split('.')[0]
+            
+            # v1.0 官方路徑: intraday/quote
+            # 先試 stock, 失敗再試 index
+            for path_type in ["stock", "index"]:
+                url = f"https://api.fugle.tw/marketdata/v1.0/{path_type}/intraday/quote/{s}"
+                headers = {"X-API-KEY": self.fugle_token}
+                response = requests.get(url, headers=headers, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    price = (data.get('lastPrice') or 
+                             data.get('indexValue') or 
+                             data.get('closePrice') or
                              data.get('openPrice'))
-                
-                if price:
-                    return {
-                        "price": float(price),
-                        "time": self._get_taipei_now().strftime("%H:%M:%S"),
-                        "is_cached": False,
-                        "source": "Fugle"
-                    }
+                    
+                    if not price and 'lastTrade' in data:
+                        price = data['lastTrade'].get('price')
+                    
+                    if price:
+                        return {
+                            "price": float(price),
+                            "time": self._get_taipei_now().strftime("%H:%M:%S"),
+                            "is_cached": False,
+                            "source": "Fugle"
+                        }
             return None
-        except Exception as e:
-            # print(f"[{symbol}] Fugle Snapshot Error: {e}")
+        except:
             return None
 
     def _get_yf_symbol(self, symbol):
         """將標的轉換為 yfinance 格式，包含市場後綴判定"""
-        s_input = str(symbol).upper()
+        s_input = str(symbol).upper().strip()
         if s_input.endswith((".TW", ".TWO", ".HK", ".US")):
             return s_input
             
         s = s_input.split('.')[0]
         if s in ["TAIEX", "^TWII", "IX0001"]: return "^TWII"
         
-        # 判斷台股/ETF 代碼 (優先使用 .TW，若失敗由 _get_yfinance_price 自動切換為 .TWO)
-        if s.isdigit() and 4 <= len(s) <= 6:
-            # 5, 8 開頭的 4 碼通常是上櫃，其他優先 .TW
+        # 判斷台股/ETF 代碼 (2330, 0050, 00763U等)
+        import re
+        # 更加寬鬆的判定：4-8位由數字與字母組成的代碼
+        if re.match(r'^[0-9A-Z]{4,8}$', s) and s[0].isdigit():
+            # 5, 8 開頭的 4 碼通常是上櫃
             if len(s) == 4 and s.startswith(('5', '8')):
                 return f"{s}.TWO"
             return f"{s}.TW"
         return s
 
     def _get_yfinance_price(self, symbol):
-        """獲獲 yfinance 即時價格 (含自動市場切換)"""
+        """獲獲 yfinance 即時價格 (含自動市場切換與備援)"""
         try:
             yf_sym = self._get_yf_symbol(symbol)
             
@@ -160,8 +162,8 @@ class PriceFetcher:
                 ticker = yf.Ticker(sym)
                 try:
                     info = ticker.fast_info
-                    # 同時相容屬性存取與字典存取
-                    price = getattr(info, 'last_price', None)
+                    # 盡可能嘗試各種屬性抓取價格
+                    price = getattr(info, 'last_price', None) or getattr(info, 'lastPrice', None)
                     if price is None:
                         try: price = info['last_price']
                         except: pass
@@ -169,15 +171,24 @@ class PriceFetcher:
                     if price and price > 0:
                         return float(price)
                 except: pass
-                # 備援：抓取今日 K 線
-                h = self._safe_history(ticker, period="1d")
-                return float(h['Close'].iloc[-1]) if not h.empty else None
+                
+                # 備援：抓取歷史數據（市場關閉時較穩定）
+                h = self._safe_history(ticker, period="2d")
+                if not h.empty:
+                    return float(h['Close'].iloc[-1])
+                return None
 
             price = fetch(yf_sym)
+            
+            # 如果失敗且帶有 .T 後綴，嘗試切換市場
             if price is None and (".T" in yf_sym):
-                # 切換市場後綴重試
                 retry_sym = yf_sym.replace(".TW", ".TMP").replace(".TWO", ".TW").replace(".TMP", ".TWO")
                 price = fetch(retry_sym)
+            
+            # 如果還是失敗，最後嘗試不帶後綴的原代碼 (針對某些特殊標的)
+            if price is None:
+                price = fetch(symbol.split('.')[0])
+                
             return price
         except:
             return None
