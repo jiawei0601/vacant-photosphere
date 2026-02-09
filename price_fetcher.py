@@ -92,7 +92,7 @@ class PriceFetcher:
                 "source": "yfinance"
             }
 
-        print(f"[{symbol}] 報價獲取失敗。")
+        print(f"[{symbol}] 報價獲取失敗 (Fugle & yfinance 皆無資料)。")
         return None
 
     def _get_fugle_snapshot(self, symbol):
@@ -107,12 +107,20 @@ class PriceFetcher:
             if response.status_code == 200:
                 data = response.json()
                 
-                # 優先順序：1. lastTrade (撮合) 2. indexValue (指數) 3. lastPrice 
+                # 優先順序：1. lastTrade (撮合) 2. indexValue (指數) 3. 各種價格欄位
                 last_trade = data.get('lastTrade', {})
-                price = last_trade.get('price') if isinstance(last_trade, dict) else None
+                price = None
+                
+                if isinstance(last_trade, dict):
+                    price = last_trade.get('price')
                 
                 if not price:
-                    price = data.get('indexValue') or data.get('lastPrice') or data.get('closePrice')
+                    # 嘗試所有可能的價格欄位
+                    price = (data.get('indexValue') or 
+                             data.get('lastPrice') or 
+                             data.get('closePrice') or 
+                             data.get('price') or
+                             data.get('openPrice'))
                 
                 if price:
                     return {
@@ -123,29 +131,23 @@ class PriceFetcher:
                     }
             return None
         except Exception as e:
-            print(f"[{symbol}] Fugle Snapshot Error: {e}")
+            # print(f"[{symbol}] Fugle Snapshot Error: {e}")
             return None
 
     def _get_yf_symbol(self, symbol):
         """將標的轉換為 yfinance 格式，包含市場後綴判定"""
         s_input = str(symbol).upper()
-        # 若已包含完整後綴，直接回傳
         if s_input.endswith((".TW", ".TWO", ".HK", ".US")):
             return s_input
             
         s = s_input.split('.')[0]
         if s in ["TAIEX", "^TWII", "IX0001"]: return "^TWII"
         
-        # 判斷台股/ETF 代碼
-        if s[0:1].isdigit():
-            # 簡易規則：
-            # 1. 長度為 5 或 6 且含有字母 (U/L/R...)，通常是 ETF，大多在上市 (.TW)
-            # 2. 5, 6, 8 開頭的 4 碼通常是上櫃 (.TWO)
-            # 3. 其他 4 碼 (1, 2, 3, 4, 9) 預設上市 (.TW)，若失敗會重試
-            if len(s) == 4 and s.startswith(('5', '6', '8')):
+        # 判斷台股/ETF 代碼 (優先使用 .TW，若失敗由 _get_yfinance_price 自動切換為 .TWO)
+        if s.isdigit() and 4 <= len(s) <= 6:
+            # 5, 8 開頭的 4 碼通常是上櫃，其他優先 .TW
+            if len(s) == 4 and s.startswith(('5', '8')):
                 return f"{s}.TWO"
-            
-            # 部分 1xxx, 4xxx, 3xxx 也是上櫃 (如 1815, 3105)，預設先用 .TW 跑，失敗會換 .TWO
             return f"{s}.TW"
         return s
 
@@ -157,22 +159,27 @@ class PriceFetcher:
             def fetch(sym):
                 ticker = yf.Ticker(sym)
                 try:
-                    # 使用 fast_info 效率較高
                     info = ticker.fast_info
-                    if 'last_price' in info and info['last_price'] > 0:
-                        return float(info['last_price'])
+                    # 同時相容屬性存取與字典存取
+                    price = getattr(info, 'last_price', None)
+                    if price is None:
+                        try: price = info['last_price']
+                        except: pass
+                    
+                    if price and price > 0:
+                        return float(price)
                 except: pass
-                # 備援：抓取今日 K 線 (使用 safe_history 靜音)
-                h = self._safe_history(ticker, period="1d", interval="1m")
+                # 備援：抓取今日 K 線
+                h = self._safe_history(ticker, period="1d")
                 return float(h['Close'].iloc[-1]) if not h.empty else None
 
             price = fetch(yf_sym)
-            if price is None and ".T" in yf_sym:
+            if price is None and (".T" in yf_sym):
+                # 切換市場後綴重試
                 retry_sym = yf_sym.replace(".TW", ".TMP").replace(".TWO", ".TW").replace(".TMP", ".TWO")
                 price = fetch(retry_sym)
             return price
-        except Exception as e:
-            # 僅在完全失敗時印出
+        except:
             return None
 
     def _normalize_fugle_symbol(self, symbol):
