@@ -66,7 +66,6 @@ class PriceFetcher:
         if self.fugle_token:
             import re
             # 台股代碼規則: 4-6位數字 + 選用大寫字母 (如 2330, 00763U)
-            # 使用 search 較寬鬆，並支援更多特殊 ETF 代碼
             is_taiwan = bool(re.search(r'^\d{4,7}[A-Z0-9]?$', orig_symbol))
             fugle_symbol = orig_symbol
             if is_tw_index:
@@ -80,9 +79,12 @@ class PriceFetcher:
                         "time": now,
                         "source": "Fugle"
                     }
+                    # 若為開發環境可開啟以下日誌
+                    # print(f"  [Fugle] {orig_symbol}: {fugle_data['price']}")
                     return fugle_data
 
         # 2. 第二備援/國際標的：yfinance
+        # 當看到 yfinance 的日誌時，代表上面的 Fugle 抓取失敗或不適用
         yf_price = self._get_yfinance_price(orig_symbol)
         if yf_price:
             self.price_cache[orig_symbol] = {
@@ -101,20 +103,23 @@ class PriceFetcher:
         return None
 
     def _get_fugle_snapshot(self, symbol):
-        """獲取富果行情快照 (使用 intraday/quote)"""
+        """獲取富果行情快照 (修正 v1.0 解析邏輯)"""
         if not self.fugle_token: return None
         try:
-            # 去除可能帶有的市場後綴，Fugle 不需要
             s = str(symbol).upper().split('.')[0]
+            headers = {"X-API-KEY": self.fugle_token}
             
-            # v1.0 官方路徑: intraday/quote
-            # 先試 stock, 失敗再試 index
+            # v1.0 官方路徑可能分布在 stock 或 index
+            # 對於 00763U 這種期指 ETF，通常在 stock
             for path_type in ["stock", "index"]:
                 url = f"https://api.fugle.tw/marketdata/v1.0/{path_type}/intraday/quote/{s}"
-                headers = {"X-API-KEY": self.fugle_token}
                 response = requests.get(url, headers=headers, timeout=10)
                 if response.status_code == 200:
-                    data = response.json()
+                    raw_data = response.json()
+                    
+                    # 部分 v1.0 接口會嵌套在 'data' 欄位
+                    data = raw_data.get('data', raw_data)
+                    
                     price = (data.get('lastPrice') or 
                              data.get('indexValue') or 
                              data.get('closePrice') or
@@ -192,6 +197,19 @@ class PriceFetcher:
             return price
         except:
             return None
+
+    def get_stock_name(self, symbol):
+        """
+        獲取標的名稱 (透過 yfinance)
+        """
+        try:
+            yf_sym = self._get_yf_symbol(symbol)
+            ticker = yf.Ticker(yf_sym)
+            # 優先獲取 shortName 或 longName
+            name = ticker.info.get('shortName') or ticker.info.get('longName') or symbol
+            return name
+        except:
+            return symbol
 
     def _normalize_fugle_symbol(self, symbol):
         """標準化標的代碼以符合 Fugle API 要求"""

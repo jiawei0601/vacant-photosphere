@@ -21,6 +21,7 @@ class Notifier:
             self.app.add_handler(CommandHandler("alist", self._alist_command))
             self.app.add_handler(CommandHandler("list", self._list_command))
             self.app.add_handler(CommandHandler("dlist", self._dlist_command))
+            self.app.add_handler(CommandHandler("add", self._add_command))
             self.app.add_handler(CommandHandler("sethigh", self._set_high_command))
             self.app.add_handler(CommandHandler("setlow", self._set_low_command))
             self.app.add_handler(CommandHandler("settime", self._set_interval_command))
@@ -47,6 +48,7 @@ class Notifier:
             self.report_callback = None
             self.stock_chart_callback = None
             self.monitoring_list_callback = None
+            self.add_item_callback = None
 
     async def _debug_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
@@ -69,6 +71,7 @@ class Notifier:
                 "• `/prev` - 顯示前一交易日的完整盤後總結報告\n"
                 "• `/alist` - 顯示目前「已暫停警報」的標的清單\n\n"
                 "⚙️ **警報管理**\n"
+                "• `/add [代碼] [上限] [下限]` - 新增監控標的與警報值\n"
                 "• `/stop [代碼]` - 暫停特定標的的價格警報\n"
                 "• `/start [代碼]` - 恢復特定標的的價格警報\n"
                 "• `/sethigh [代碼] [價]` - 設定上限警報\n"
@@ -116,6 +119,24 @@ class Notifier:
     def set_report_callback(self, callback): self.report_callback = callback
     def set_stock_chart_callback(self, callback): self.stock_chart_callback = callback
     def set_monitoring_list_callback(self, callback): self.monitoring_list_callback = callback
+    def set_add_item_callback(self, callback): self.add_item_callback = callback
+
+    async def _add_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not context.args:
+            await update.message.reply_text("💡 指令格式：`/add [代碼] [上限價] [下限價]`\n範例：`/add 2330 1100 950`")
+            return
+        
+        symbol = context.args[0].upper()
+        high = float(context.args[1]) if len(context.args) > 1 else None
+        low = float(context.args[2]) if len(context.args) > 2 else None
+        
+        if self.add_item_callback:
+            await update.message.reply_text(f"⏳ 正在嘗試新增 {symbol}...")
+            success, name = await self.add_item_callback(symbol, high, low)
+            if success:
+                await update.message.reply_text(f"✅ 成功新增標的！\n名稱：`{name}`\n上限：`{high or '無'}`\n下限：`{low or '無'}`")
+            else:
+                await update.message.reply_text(f"❌ 新增失敗，請檢查代碼是否正確或系統日誌。")
 
     async def _set_interval_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not context.args:

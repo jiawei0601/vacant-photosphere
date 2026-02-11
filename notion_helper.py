@@ -249,6 +249,36 @@ class NotionHelper:
         except Exception as e:
             print(f"更新 Notion 警戒值時發生錯誤: {e}")
 
+    def add_monitoring_item(self, symbol, name, high_alert=None, low_alert=None):
+        """
+        新增監控標的至 Notion 資料庫
+        """
+        if not self.notion or not self.database_id:
+            print("❌ Notion 或監控資料庫 ID 未設定，無法新增")
+            return False
+
+        try:
+            properties = {
+                "名稱": {"title": [{"text": {"content": name}}]},
+                "代碼": {"rich_text": [{"text": {"content": symbol}}]},
+                "狀態": {"status": {"name": "正常"}},
+                "更新時間": {"date": {"start": self._get_now_iso()}}
+            }
+            if high_alert is not None:
+                properties["上限警戒值"] = {"number": float(high_alert)}
+            if low_alert is not None:
+                properties["下限警戒值"] = {"number": float(low_alert)}
+
+            self.notion.pages.create(
+                parent={"database_id": self.database_id},
+                properties=properties
+            )
+            print(f"✅ 成功新增監控標的: {name} ({symbol})")
+            return True
+        except Exception as e:
+            print(f"❌ 新增 Notion 標的失敗: {e}")
+            return False
+
 if __name__ == "__main__":
     # 簡單測試
     helper = NotionHelper()

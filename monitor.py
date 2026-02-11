@@ -191,6 +191,20 @@ class MarketMonitor:
             lines.append(f"• **{i['name']}** ({i['symbol']}) 上:{i['high_alert'] or '無'} 下:{i['low_alert'] or '無'}")
         return "\n".join(lines)
 
+    async def add_monitoring_callback(self, symbol, high=None, low=None):
+        """
+        新增監控項目（TG 指令回呼）
+        """
+        try:
+            # 獲取名稱
+            name = self.fetcher.get_stock_name(symbol)
+            # 新增至 Notion
+            success = self.notion.add_monitoring_item(symbol, name, high_alert=high, low_alert=low)
+            return success, name
+        except Exception as e:
+            print(f"Add Monitoring Error: {e}")
+            return False, symbol
+
     async def test_report_callback(self, report_type):
         if report_type == "daily":
             data = await self.get_report_data(offset=0)
@@ -237,6 +251,7 @@ class MarketMonitor:
         self.notifier.set_report_callback(self.get_graphical_report_callback)
         self.notifier.set_stock_chart_callback(self.get_stock_chart_callback)
         self.notifier.set_monitoring_list_callback(self.get_monitoring_limits_callback)
+        self.notifier.set_add_item_callback(self.add_monitoring_callback)
         
         app = self.notifier.app
         if app:
