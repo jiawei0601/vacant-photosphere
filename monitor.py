@@ -191,13 +191,13 @@ class MarketMonitor:
             lines.append(f"• **{i['name']}** ({i['symbol']}) 上:{i['high_alert'] or '無'} 下:{i['low_alert'] or '無'}")
         return "\n".join(lines)
 
-    async def add_monitoring_callback(self, symbol, high=None, low=None):
+    async def add_monitoring_callback(self, symbol, high=None, low=None, custom_name=None):
         """
         新增監控項目（TG 指令回呼）
         """
         try:
-            # 獲取名稱
-            name = self.fetcher.get_stock_name(symbol)
+            # 如果使用者沒自定名稱，才去抓
+            name = custom_name if custom_name else self.fetcher.get_stock_name(symbol)
             # 新增至 Notion
             success = self.notion.add_monitoring_item(symbol, name, high_alert=high, low_alert=low)
             return success, name

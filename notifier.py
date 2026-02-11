@@ -71,7 +71,8 @@ class Notifier:
                 "• `/prev` - 顯示前一交易日的完整盤後總結報告\n"
                 "• `/alist` - 顯示目前「已暫停警報」的標的清單\n\n"
                 "⚙️ **警報管理**\n"
-                "• `/add [代碼] [上限] [下限]` - 新增監控標的與警報值\n"
+                "• `/add [代碼] [名稱] [上限] [下限]` - 新增監控標的\n"
+                "  (註：名稱若輸入 `-` 則會自動抓取，範例：`/add 2330 - 1100 900`)\n"
                 "• `/stop [代碼]` - 暫停特定標的的價格警報\n"
                 "• `/start [代碼]` - 恢復特定標的的價格警報\n"
                 "• `/sethigh [代碼] [價]` - 設定上限警報\n"
@@ -123,20 +124,33 @@ class Notifier:
 
     async def _add_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not context.args:
-            await update.message.reply_text("💡 指令格式：`/add [代碼] [上限價] [下限價]`\n範例：`/add 2330 1100 950`")
+            await update.message.reply_text(
+                "💡 指令格式：`/add [代碼] [名稱] [上限價] [下限價]`\n"
+                "• 名稱輸入 `-` 則自動抓取\n"
+                "• 範例：`/add 2330 台積電 1100 900`\n"
+                "• 範例：`/add 2330 - 1100 900`"
+            )
             return
         
-        symbol = context.args[0].upper()
-        high = float(context.args[1]) if len(context.args) > 1 else None
-        low = float(context.args[2]) if len(context.args) > 2 else None
-        
-        if self.add_item_callback:
-            await update.message.reply_text(f"⏳ 正在嘗試新增 {symbol}...")
-            success, name = await self.add_item_callback(symbol, high, low)
-            if success:
-                await update.message.reply_text(f"✅ 成功新增標的！\n名稱：`{name}`\n上限：`{high or '無'}`\n下限：`{low or '無'}`")
-            else:
-                await update.message.reply_text(f"❌ 新增失敗，請檢查代碼是否正確或系統日誌。")
+        try:
+            symbol = context.args[0].upper()
+            # 判斷名稱參數
+            provided_name = context.args[1] if len(context.args) > 1 else "-"
+            # 如果為 "-"，代表要自動抓取，傳 None 給 callback
+            final_name = None if provided_name == "-" else provided_name
+            
+            high = float(context.args[2]) if len(context.args) > 2 else None
+            low = float(context.args[3]) if len(context.args) > 3 else None
+            
+            if self.add_item_callback:
+                await update.message.reply_text(f"⏳ 正在嘗試新增 {symbol}...")
+                success, name = await self.add_item_callback(symbol, high, low, custom_name=final_name)
+                if success:
+                    await update.message.reply_text(f"✅ 成功新增標的！\n代碼：`{symbol}`\n名稱：`{name}`\n上限：`{high or '無'}`\n下限：`{low or '無'}`")
+                else:
+                    await update.message.reply_text(f"❌ 新增失敗，請檢查代碼是否正確或系統日誌。")
+        except Exception as e:
+             await update.message.reply_text(f"❌ 格式錯誤：{e}\n請確保代碼後方跟著名稱(或-)及數字價位。")
 
     async def _set_interval_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not context.args:
