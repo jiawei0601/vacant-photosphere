@@ -53,6 +53,31 @@ class MarketMonitor:
         
         return market_start <= current_time <= market_end
 
+    def is_us_market_open(self):
+        """
+        判斷美股是否在交易時段 (台北時間 21:30 - 04:00 或 22:30 - 05:00)
+        簡單起見，目前固定抓 21:00 - 06:00
+        """
+        if self.allow_outside:
+            return True
+            
+        now = self._get_now_taipei()
+        
+        # 美股週一開盤是台灣週一晚上，週五收盤是台灣週六清晨
+        # 這裡邏輯簡化為：台灣時間週二至週六 00:00-06:00 OR 週一至週五 21:00-23:59
+        
+        current_time = now.time()
+        weekday = now.weekday() # 0=Mon, 5=Sat, 6=Sun
+
+        # 週一至週五晚上
+        if 0 <= weekday <= 4 and current_time >= dt_time(21, 0):
+            return True
+        # 週二至週六凌晨
+        if 1 <= weekday <= 5 and current_time <= dt_time(6, 0):
+            return True
+            
+        return False
+
     async def check_once(self):
         print(f"[{datetime.now()}] 開始執行價格檢查...")
         
@@ -66,6 +91,16 @@ class MarketMonitor:
         
         for item in items:
             symbol = item['symbol']
+            # 辨識市場
+            is_us = symbol.isalpha() and "." not in symbol
+            
+            # 如果不是交易時段且沒開啟強制檢查，跳過該市場標的
+            if not self.allow_outside:
+                if is_us and not self.is_us_market_open():
+                    continue
+                if not is_us and not self.is_market_open():
+                    continue
+
             price_data = self.fetcher.get_last_price(symbol)
             
             if price_data is None:
@@ -500,17 +535,22 @@ class MarketMonitor:
                 import time as py_time
                 current_unix = py_time.time()
                 
-                if self.is_market_open():
+                # 只要台股或美股其中一個有開，就進入檢查
+                if self.is_market_open() or self.is_us_market_open():
                     if current_unix - self.last_check_time >= self.interval:
-                        print(f"[{now}] 執行自動價格檢查 (間隔: {self.interval}s)...")
+                        market_status = []
+                        if self.is_market_open(): market_status.append("台股(開)")
+                        if self.is_us_market_open(): market_status.append("美股(開)")
+                        
+                        print(f"[{now}] 執行自動價格檢查 ({', '.join(market_status)}, 間隔: {self.interval}s)...")
                         success, fail = await self.check_once()
                         self.last_check_time = current_unix
-                        # 自動檢查完成後發送訊息
-                        await self.notifier.send_message(f"✅ 定期價格檢查完成。成功: {success}, 失敗: {fail}")
+                        if success > 0 or fail > 0:
+                            await self.notifier.send_message(f"✅ 定期價格檢查完成。成功: {success}, 失敗: {fail}")
                 else:
-                    # 如果不是交易時段，且有記錄過上次檢查時間，則靜默跳過
+                    # 如果都不是交易時段，且有記錄過上次檢查時間，則靜默跳過
                     if current_unix - self.last_check_time >= self.interval:
-                        print(f"[{now}] 非交易時段且未開啟全天候監控，跳過自動檢查。")
+                        print(f"[{now}] 非交易時段 (台/美均收) 且未開啟全天候監控，跳過自動檢查。")
                         self.last_check_time = current_unix
 
             except Exception as e:

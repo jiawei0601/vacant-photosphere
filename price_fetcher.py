@@ -50,16 +50,25 @@ class PriceFetcher:
                 }
 
         try:
-            # 1. 優先嘗試富果 (由使用者要求)
-            if self.fugle_token:
-                fugle_data = self._get_fugle_snapshot(symbol)
-                if fugle_data:
-                    # 更新快取
+            # 辨識是否為美股 (純字母代碼且不含點)
+            is_us_stock = symbol.isalpha() and "." not in symbol
+            
+            if is_us_stock:
+                print(f"[{symbol}] 偵測為美股代碼，使用 yfinance 抓取即時價格...")
+                yf_price = self._get_yfinance_price_for_us(symbol)
+                if yf_price:
                     self.price_cache[symbol] = {
-                        "price": fugle_data['price'],
+                        "price": yf_price,
                         "time": now
                     }
-                    return fugle_data
+                    return {
+                        "price": yf_price,
+                        "time": now.strftime("%H:%M:%S"),
+                        "is_cached": False,
+                        "source": "yfinance (US)"
+                    }
+
+            # 1. 優先嘗試富果 (台股)
 
             # 2. 如果富果未設定或失敗，嘗試 FinMind
             # 取得最近幾天的資料以確保能拿到最後一筆成交價 (擴大到 14 天以應對長假)
@@ -154,9 +163,26 @@ class PriceFetcher:
             print(f"[{symbol}] Fugle Snapshot 備援失敗: {e}")
             return None
 
+    def _get_yfinance_price_for_us(self, symbol):
+        """
+        獲取美股即時價格
+        """
+        try:
+            ticker = yf.Ticker(symbol)
+            info = ticker.fast_info
+            if hasattr(info, 'last_price') and info.last_price:
+                return float(info.last_price)
+            hist = ticker.history(period="1d", interval="1m")
+            if not hist.empty:
+                return float(hist.iloc[-1]['Close'])
+            return None
+        except Exception as e:
+            print(f"[{symbol}] yfinance 美股獲取失敗: {e}")
+            return None
+
     def _get_yfinance_price(self, symbol):
         """
-        使用 yfinance 獲取即時價格備援
+        使用 yfinance 獲取即時價格備援 (台股)
         """
         try:
             # 轉換代碼: yfinance 需要 .TW (上市) 或 .TWO (上櫃)
@@ -229,21 +255,35 @@ class PriceFetcher:
             end_date_str = datetime.now().strftime("%Y-%m-%d")
             start_date_str = (datetime.now() - timedelta(days=40)).strftime("%Y-%m-%d")
             
-            # 1. 優先嘗試富果
-            df = None
-            if self.fugle_token:
-                df = self._get_fugle_historical(symbol, start_date_str, end_date_str)
-                if df is not None and not df.empty:
-                     source_tag = "Fugle"
+            # 辨識是否為美股
+            is_us_stock = symbol.isalpha() and "." not in symbol
             
-            # 2. 如果富果失敗或未設定，嘗試 FinMind
-            if df is None or df.empty:
-                df = self.loader.taiwan_stock_daily(
-                    stock_id=symbol,
-                    start_date=start_date_str,
-                    end_date=end_date_str
-                )
-                source_tag = "FinMind"
+            df = None
+            if is_us_stock:
+                print(f"[{symbol}] 偵測為美股代碼，使用 yfinance 獲取歷史數據...")
+                ticker = yf.Ticker(symbol)
+                df = ticker.history(start=start_date_str, end=end_date_str)
+                if df is not None and not df.empty:
+                    df.columns = [c.lower() for c in df.columns]
+                    # yfinance 的日期在索引
+                    df = df.reset_index()
+                    df = df.rename(columns={'Date': 'date', 'Volume': 'trading_volume'})
+                    source_tag = "yfinance (US)"
+            else:
+                # 1. 優先嘗試富果 (台股)
+                if self.fugle_token:
+                    df = self._get_fugle_historical(symbol, start_date_str, end_date_str)
+                    if df is not None and not df.empty:
+                         source_tag = "Fugle"
+                
+                # 2. 如果富果失敗或未設定，嘗試 FinMind
+                if df is None or df.empty:
+                    df = self.loader.taiwan_stock_daily(
+                        stock_id=symbol,
+                        start_date=start_date_str,
+                        end_date=end_date_str
+                    )
+                    source_tag = "FinMind"
 
             if df is not None and not df.empty:
                 # 統一欄位名稱為小寫
