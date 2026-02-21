@@ -41,16 +41,16 @@ class MarketMonitor:
 
     def is_market_open(self):
         """
-        判斷台股是否在交易時段 (09:00 - 13:35)
-        週一至週五
+        判斷台股是否在交易時段 (週一至週五 09:00 - 13:35)
+        日期判定優先於 allow_outside 檢查
         """
-        if self.allow_outside:
-            return True
-            
         now = self._get_now_taipei()
-        # 0 為週一, 4 為週五
+        # 週六 (5) 與週日 (6) 絕對不開
         if now.weekday() > 4:
             return False
+            
+        if self.allow_outside:
+            return True
             
         market_start = dt_time(9, 0)
         market_end = dt_time(13, 35)
@@ -61,14 +61,24 @@ class MarketMonitor:
     def is_us_market_open(self):
         """
         判斷美股是否在交易時段 (台北時間 22:30 - 05:00)
+        日期判定優先於 allow_outside 檢查
         """
+        now = self._get_now_taipei()
+        weekday = now.weekday() # 0=Mon, 5=Sat, 6=Sun
+        current_time = now.time()
+
+        # 週日全天與週一開盤前 (22:30 前) 不進行監控
+        if weekday == 6:
+            return False
+        if weekday == 0 and current_time < dt_time(22, 30):
+            return False
+        # 週六僅在清晨 05:00 前 (美股週五盤) 允許
+        if weekday == 5 and current_time > dt_time(5, 0):
+            return False
+
         if self.allow_outside:
             return True
             
-        now = self._get_now_taipei()
-        current_time = now.time()
-        weekday = now.weekday() # 0=Mon, 5=Sat, 6=Sun
-
         # 週一至週五晚上 22:30 - 23:59
         if 0 <= weekday <= 4 and current_time >= dt_time(22, 30):
             return True
