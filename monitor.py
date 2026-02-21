@@ -41,7 +41,7 @@ class MarketMonitor:
 
     def is_market_open(self):
         """
-        判斷台股是否在交易時段 (09:00 - 13:30)
+        判斷台股是否在交易時段 (09:00 - 13:35)
         週一至週五
         """
         if self.allow_outside:
@@ -53,32 +53,27 @@ class MarketMonitor:
             return False
             
         market_start = dt_time(9, 0)
-        market_end = dt_time(13, 35) # 稍微多抓一點緩衝
+        market_end = dt_time(13, 35)
         current_time = now.time()
         
         return market_start <= current_time <= market_end
 
     def is_us_market_open(self):
         """
-        判斷美股是否在交易時段 (台北時間 21:30 - 04:00 或 22:30 - 05:00)
-        簡單起見，目前固定抓 21:00 - 06:00
+        判斷美股是否在交易時段 (台北時間 22:30 - 05:00)
         """
         if self.allow_outside:
             return True
             
         now = self._get_now_taipei()
-        
-        # 美股週一開盤是台灣週一晚上，週五收盤是台灣週六清晨
-        # 這裡邏輯簡化為：台灣時間週二至週六 00:00-06:00 OR 週一至週五 21:00-23:59
-        
         current_time = now.time()
         weekday = now.weekday() # 0=Mon, 5=Sat, 6=Sun
 
-        # 週一至週五晚上
-        if 0 <= weekday <= 4 and current_time >= dt_time(21, 0):
+        # 週一至週五晚上 22:30 - 23:59
+        if 0 <= weekday <= 4 and current_time >= dt_time(22, 30):
             return True
-        # 週二至週六凌晨
-        if 1 <= weekday <= 5 and current_time <= dt_time(6, 0):
+        # 週二至週六凌晨 00:00 - 05:00
+        if 1 <= weekday <= 5 and current_time <= dt_time(5, 0):
             return True
             
         return False
@@ -470,6 +465,38 @@ class MarketMonitor:
             await self.notifier.send_message(message)
         return True
 
+    async def send_us_closing_report(self):
+        """發送美股收盤報告 (NASDAQ, S&P 500, Dow)"""
+        now = self._get_now_taipei()
+        # 使用台北時間週二至週六清晨作為美股前一晚的收盤判定
+        date_key = now.strftime("%Y-%m-%d")
+        
+        indices = {
+            "NASDAQ": "^IXIC",
+            "S&P 500": "^GSPC",
+            "道瓊工業": "^DJI"
+        }
+        
+        lines = [f"🇺🇸 **美股收盤行情總結** ({date_key})\n"]
+        success = False
+        
+        for name, symbol in indices.items():
+            data = self.fetcher.get_last_price(symbol)
+            if data:
+                price = data['price']
+                change_pct = data.get('change_pct', 0)
+                emoji = "🔴" if change_pct > 0 else "🟢" if change_pct < 0 else "⚪"
+                lines.append(f"• {name}: `{price:,.2f}` ({emoji} {change_pct:+.2f}%)")
+                success = True
+            else:
+                lines.append(f"• {name}: `---` (獲取失敗)")
+        
+        if success:
+            await self.notifier.send_message("\n".join(lines))
+            print("美股收盤報告已發送。")
+        else:
+            print("無法獲取任何美股指數，不發送報告。")
+
     async def run_monitor_loop(self):
         """背景執行的監控迴圈 (用於 Bot 模式)"""
         print(f"監控迴圈啟動 (主檢查間隔: {self.interval} 秒，時區: 台北 UTC+8)")
@@ -544,6 +571,8 @@ class MarketMonitor:
             await self.send_noon_report()
         elif mode == "daily":
             await self.send_daily_report()
+        elif mode == "us_daily":
+            await self.send_us_closing_report()
         else:
             print(f"不支援的模式: {mode}")
 
@@ -581,8 +610,8 @@ class MarketMonitor:
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="台美股監控系統")
-    parser.add_argument("--mode", choices=["bot", "check", "noon", "daily"], default="bot",
-                        help="執行模式: bot (常駐機器人), check (單次檢查), noon (午間報告), daily (盤後報告)")
+    parser.add_argument("--mode", choices=["bot", "check", "noon", "daily", "us_daily"], default="bot",
+                        help="執行模式: bot (常駐機器人), check (單次檢查), noon (午間報告), daily (台股盤後), us_daily (美股收盤)")
     args = parser.parse_args()
 
     monitor = MarketMonitor()
