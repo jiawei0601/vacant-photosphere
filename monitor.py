@@ -510,6 +510,12 @@ class MarketMonitor:
                         if self.last_daily_report_date != today:
                             report_data = await self.get_report_data(offset=0)
                             
+                            # 檢查數據日期是否為今日
+                            if report_data['date'] != today.strftime("%Y-%m-%d"):
+                                print(f"[{now}] 數據日期 ({report_data['date']}) 與今日 ({today}) 不符，判定為休市，跳過盤後報告。")
+                                self.last_daily_report_date = today
+                                continue
+
                             try:
                                 # 嘗試生成圖片報告
                                 img_path = self.generator.generate_closing_report(report_data['sentiment'], report_data['stock_list'])
