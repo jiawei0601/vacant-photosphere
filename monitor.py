@@ -9,7 +9,6 @@ from price_fetcher import PriceFetcher
 from notion_helper import NotionHelper
 from notifier import Notifier
 from report_generator import ReportGenerator
-from google_vision_ocr import GoogleVisionOCR
 
 load_dotenv()
 
@@ -19,7 +18,6 @@ class MarketMonitor:
         self.notion = NotionHelper()
         self.notifier = Notifier()
         self.generator = ReportGenerator()
-        self.ocr = GoogleVisionOCR()
         
         # 預設設定 (優先讀取環境變數)
         self.interval = int(os.getenv("CHECK_INTERVAL_SECONDS", 600))
@@ -35,7 +33,6 @@ class MarketMonitor:
         self.last_daily_report_date = None
         self.last_order_stats_date = None
         self.last_check_time = 0
-        self.last_inventory_clear_time = 0 # 記錄上次清空庫存的時間
         self.taipei_tz = timezone(timedelta(hours=8))
 
     def _get_now_taipei(self):
@@ -364,90 +361,6 @@ class MarketMonitor:
             print(f"回調產生 K 線圖失敗: {e}")
             return None
 
-    async def inventory_callback(self, image_path, upload_date=None):
-        """處理庫存截圖解析與更新"""
-        try:
-            # --- 新增：清空資料庫邏輯 ---
-            import time as py_time
-            now_unix = py_time.time()
-            # 如果距離上次清空超過 10 分鐘 (600秒)，執行清空
-            if now_unix - self.last_inventory_clear_time > 600:
-                print("🧹 偵測到新的一波庫存上傳，正在清空舊有資料...")
-                self.notion.clear_inventory_database()
-                self.last_inventory_clear_time = now_unix
-
-            stocks = self.ocr.extract_stock_info(image_path)
-            results = []
-            for s in stocks:
-                success = self.notion.upsert_inventory_item(
-                    s['symbol'], 
-                    s['name'], 
-                    quantity=s.get('quantity', 0),
-                    avg_price=s.get('avg_price', 0.0),
-                    profit=s.get('profit', 0),
-                    date_str=upload_date
-                )
-                results.append({
-                    "symbol": s['symbol'],
-                    "name": s['name'],
-                    "quantity": s.get('quantity', 0),
-                    "profit": s.get('profit', 0),
-                    "status": "處理成功" if success else "處理失敗"
-                })
-            return results
-            return results
-        except Exception as e:
-            print(f"庫存回調執行失敗: {e}")
-            return []
-
-    async def sync_fubon_inventory_callback(self):
-        """從富邦 API 同步庫存並更新 Notion"""
-        from fubon_helper import FubonHelper
-        fubon = FubonHelper()
-        
-        if not fubon.is_available():
-            return "❌ 系統環境未安裝 Fubon Neo SDK，無法執行 API 同步。\n請聯繫管理員安裝 SDK 並配置憑證。"
-            
-        print("🔄 啟動富邦 API 庫存同步...")
-        stocks = fubon.get_inventory()
-        
-        if not stocks:
-            return "❌ 無法從富邦拉取庫存。請檢查：\n1. API Key/Secret 是否正確\n2. 憑證檔案路徑是否正確\n3. 帳號密碼是否正確"
-            
-        # 清空舊資料
-        print("🧹 同步前清空舊有庫存資料...")
-        self.notion.clear_inventory_database()
-        self.last_inventory_clear_time = time.time()
-        
-        results = []
-        for s in stocks:
-            success = self.notion.upsert_inventory_item(
-                s['symbol'], 
-                s['name'], 
-                quantity=s['quantity'],
-                avg_price=s['avg_price'],
-                profit=s['profit']
-            )
-            results.append({
-                "symbol": s['symbol'],
-                "name": s['name'],
-                "status": "同步成功" if success else "同步失敗"
-            })
-            
-        fubon.logout()
-        
-        summary = "✅ **富邦 API 庫存同步結果**\n\n"
-        for r in results:
-            summary += f"• {r['name']} ({r['symbol']}) - {r['status']}\n"
-            
-        return summary
-
-    async def get_ocr_usage_report(self):
-        """獲取 OCR 使用量報告"""
-        if self.ocr:
-            return self.ocr.get_monthly_usage_report()
-        return "⚠️ OCR 引擎尚未啟動"
-
     async def get_monitoring_limits_callback(self):
         """獲取目前監控清單與警戒上下限摘要"""
         items = self.notion.get_monitoring_list()
@@ -664,9 +577,6 @@ class MarketMonitor:
         self.notifier.set_report_callback(self.get_graphical_report_callback)
         self.notifier.set_stock_chart_callback(self.get_stock_chart_callback)
         self.notifier.set_monitoring_list_callback(self.get_monitoring_limits_callback)
-        self.notifier.set_inventory_callback(self.inventory_callback)
-        self.notifier.set_ocr_usage_callback(self.get_ocr_usage_report)
-        self.notifier.set_fubon_sync_callback(self.sync_fubon_inventory_callback)
 
 if __name__ == "__main__":
     import argparse

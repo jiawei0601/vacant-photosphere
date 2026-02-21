@@ -33,10 +33,8 @@ class Notifier:
             self.app.add_handler(CommandHandler("check", self._check_command)) # New command
             self.app.add_handler(CommandHandler("apicheck", self._api_usage_command)) # New command
             self.app.add_handler(CommandHandler("test", self._test_command)) # New command for testing
-            self.app.add_handler(CommandHandler("sync", self._sync_command)) # New command
             self.app.add_handler(CommandHandler("help", self._help_command))
             from telegram.ext import MessageHandler, filters
-            self.app.add_handler(MessageHandler(filters.PHOTO, self._photo_handler))
             self.app.add_handler(MessageHandler(filters.ALL, self._debug_handler))
             self.data_callback = None
             self.alert_callback = None
@@ -49,9 +47,6 @@ class Notifier:
             self.report_callback = None # New callback
             self.stock_chart_callback = None # New callback
             self.monitoring_list_callback = None # New callback
-            self.inventory_callback = None # New callback for OCR
-            self.fubon_sync_callback = None # New callback for Fubon API Sync
-            self.ocr_usage_callback = None # New callback for OCR usage
 
     async def _debug_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
@@ -77,9 +72,6 @@ class Notifier:
                 "• `/alist` - 查看目前暫停清單\n"
                 "• `/sethigh [代碼] [價格]` - 手動設定上限目標\n"
                 "• `/setlow [代碼] [價格]` - 手動設定下限目標\n\n"
-                "📸 **庫存同步**\n"
-                "• **圖片更新**：直接傳送持股截圖進行 OCR 辨識\n"
-                "• `/sync` - **[New]** 富邦 API 庫存自動同步\n\n"
                 "💡 **系統自動化 (Cron 模式)**\n"
                 "程式目前支援以排程啟動，例如：\n"
                 "• 09:00 開盤提醒 / 12:00 午報 / 15:00 盤後報表\n"
@@ -157,18 +149,6 @@ class Notifier:
     def set_monitoring_list_callback(self, callback):
         """設定用於獲取監控清單回呼函式"""
         self.monitoring_list_callback = callback
-
-    def set_inventory_callback(self, callback):
-        """設定用於庫存 OCR 的回呼函式"""
-        self.inventory_callback = callback
-
-    def set_ocr_usage_callback(self, callback):
-        """設定用於獲取 OCR 使用量的回呼函式"""
-        self.ocr_usage_callback = callback
-
-    def set_fubon_sync_callback(self, callback):
-        """設定用於富邦 API 同步的回呼函式"""
-        self.fubon_sync_callback = callback
 
     async def _set_interval_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """處理 /settime 指令，設定自動檢查間隔"""
@@ -297,16 +277,6 @@ class Notifier:
             await update.message.reply_text(f"❌ 執行檢查時發生錯誤: {e}")
             print(f"Error in _check_command: {e}")
 
-    async def _sync_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """處理 /sync 指令，觸發富邦 API 同步"""
-        if not self.fubon_sync_callback:
-            await update.message.reply_text("系統尚未設定富邦 API 同步功能。")
-            return
-            
-        await update.message.reply_text("🔄 正在從富邦證券 API 同步庫存資料，請稍候...")
-        result_msg = await self.fubon_sync_callback()
-        await update.message.reply_text(result_msg, parse_mode='Markdown')
-
     async def _api_usage_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.api_usage_callback:
             await update.message.reply_text("系統尚未準備好，請稍後再試。")
@@ -331,11 +301,6 @@ class Notifier:
                 fugle_key = os.getenv("FUGLE_API_TOKEN") or os.getenv("富果API KEY") or os.getenv("富果API_KEY")
                 fugle_status = "✅ 已設定" if fugle_key else "❌ 未設定"
                 msg += f"\n\n🛠️ **備援系統**\n• 富果 Fugle API: {fugle_status}"
-                
-                # 增加 OCR 使用量顯示
-                if self.ocr_usage_callback:
-                    ocr_usage = await self.ocr_usage_callback()
-                    msg += f"\n\n{ocr_usage}"
                 
                 await update.message.reply_text(msg, parse_mode='Markdown')
         except Exception as e:
@@ -467,54 +432,6 @@ class Notifier:
         success = await self.test_callback(action)
         if not success:
             await update.message.reply_text(f"❌ 測試報告生成失敗，請檢查類別名稱或 API 狀態。")
-
-    async def _photo_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """處理接收到的圖片，進行 OCR 辨識"""
-        if not self.inventory_callback:
-            await update.message.reply_text("系統尚未設定庫存解析功能。")
-            return
-
-        try:
-            await update.message.reply_text("🖼️ 接收到圖片，正在準備進行 OCR 辨識 (Google Cloud Vision)，請稍候...")
-            
-            # 下載圖片
-            photo_file = await update.message.photo[-1].get_file()
-            
-            # 建立暫存目錄
-            temp_dir = "temp_images"
-            if not os.path.exists(temp_dir):
-                os.makedirs(temp_dir)
-            
-            file_extension = ".jpg"
-            file_path = os.path.join(temp_dir, f"ocr_{int(time.time())}{file_extension}")
-            await photo_file.download_to_drive(file_path)
-            
-            # 呼叫回呼函數進行解析與更新
-            results = await self.inventory_callback(file_path, upload_date=time.strftime("%Y-%m-%d"))
-            
-            if not results:
-                await update.message.reply_text("❌ OCR 辨識失敗或找不到有效的標的代碼。")
-            else:
-                summary = "✅ **庫存更新結果**\n\n"
-                for s in results:
-                    # 清理名稱中的 Markdown 特殊字元避免 Telegram 報錯
-                    safe_name = s['name'].replace('*', '\\*').replace('_', '\\_').replace('`', '\\`')
-                    summary += f"• {safe_name} ({s['symbol']}) - {s['status']}\n"
-                
-                # 額外附上使用量報告
-                if self.ocr_usage_callback:
-                    usage_msg = await self.ocr_usage_callback()
-                    summary += f"\n---\n{usage_msg}"
-                
-                await update.message.reply_text(summary, parse_mode='Markdown')
-            
-            # 刪除暫存檔
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                
-        except Exception as e:
-            await update.message.reply_text(f"❌ 處理圖片時發生錯誤: {e}")
-            print(f"Error in _photo_handler: {e}")
 
     async def start_listening(self):
         """啟動機器人監聽指令"""
