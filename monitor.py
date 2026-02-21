@@ -1,6 +1,7 @@
 import os
 import time
 import asyncio
+import json
 from datetime import datetime, time as dt_time, timezone, timedelta
 from dotenv import load_dotenv
 
@@ -19,8 +20,15 @@ class MarketMonitor:
         self.notifier = Notifier()
         self.generator = ReportGenerator()
         self.ocr = GoogleVisionOCR()
+        
+        # 預設設定 (優先讀取環境變數)
         self.interval = int(os.getenv("CHECK_INTERVAL_SECONDS", 600))
         self.allow_outside = os.getenv("ALLOW_OUTSIDE_MARKET_HOURS", "false").lower() == "true"
+        self.config_file = "config.json"
+        
+        # 載入持久化設定 (覆蓋預設值)
+        self.load_config()
+        
         self.last_open_date = None
         self.last_close_date = None
         self.last_noon_date = None
@@ -261,15 +269,46 @@ class MarketMonitor:
             
         return "\n".join(lines)
 
+    def load_config(self):
+        """從檔案載入設定"""
+        if os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                    self.interval = config.get("interval", self.interval)
+                    self.allow_outside = config.get("allow_outside", self.allow_outside)
+                print(f"✅ 已載入設定: 間隔={self.interval}s, 時段外={self.allow_outside}")
+            except Exception as e:
+                print(f"❌ 載入設定失敗: {e}")
+
+    def save_config(self):
+        """將設定儲存至檔案"""
+        try:
+            config = {
+                "interval": self.interval,
+                "allow_outside": self.allow_outside
+            }
+            with open(self.config_file, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=4, ensure_ascii=False)
+            print(f"💾 設定已儲存至 {self.config_file}")
+        except Exception as e:
+            print(f"❌ 儲存設定失敗: {e}")
+
     async def change_config_callback(self, interval=None, allow_outside=None):
         """處理來自 Telegram 的系統配置修改請求"""
+        changed = False
         if interval is not None:
             self.interval = interval
             print(f"系統檢查間隔已更變為: {self.interval} 秒")
+            changed = True
         
         if allow_outside is not None:
             self.allow_outside = allow_outside
             print(f"交易時段外處理已變更為: {self.allow_outside}")
+            changed = True
+            
+        if changed:
+            self.save_config()
 
     async def get_market_callback(self):
         """回傳市場指數資料"""
