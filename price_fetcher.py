@@ -51,7 +51,8 @@ class PriceFetcher:
 
         try:
             # 辨識是否為美股 (純字母代碼且不含點)
-            is_us_stock = symbol.isalpha() and "." not in symbol
+            # 特殊處理：TAIEX 應視為台股加權指數，不應進入美股判斷
+            is_us_stock = symbol.isalpha() and "." not in symbol and symbol.upper() != "TAIEX"
             
             if is_us_stock:
                 print(f"[{symbol}] 偵測為美股代碼，使用 yfinance 抓取即時價格...")
@@ -112,7 +113,12 @@ class PriceFetcher:
                         }
             
             # 3. 最後備援：直接用 yfinance
-            yf_price = self._get_yfinance_price(symbol)
+            # TAIEX 符號特殊處理，對應到 yfinance 的 ^TWII
+            yf_symbol = symbol
+            if symbol.upper() == "TAIEX" or symbol.upper() == "加權指數":
+                yf_symbol = "^TWII"
+                
+            yf_price = self._get_yfinance_price(yf_symbol)
             if yf_price:
                 return {
                     "price": yf_price,
@@ -185,16 +191,19 @@ class PriceFetcher:
         使用 yfinance 獲取即時價格備援 (台股)
         """
         try:
-            # 轉換代碼: yfinance 需要 .TW (上市) 或 .TWO (上櫃)
-            # 這裡先簡單嘗試 .TW，如果失敗可再擴充
-            ticker_symbol = f"{symbol}.TW"
-            if len(symbol) == 4 and symbol.startswith('6'): # 簡略判定上櫃
-                ticker_symbol = f"{symbol}.TWO"
+            # 優先處理已知符號對應
+            ticker_symbol = symbol
+            if symbol.upper() == "TAIEX" or symbol == "^TWII":
+                ticker_symbol = "^TWII"
+            elif symbol.isdigit() or (len(symbol) >= 4 and symbol[:4].isdigit()):
+                ticker_symbol = f"{symbol}.TW"
+                if len(symbol) == 4 and symbol.startswith('6'): # 簡略判定上櫃
+                    ticker_symbol = f"{symbol}.TWO"
                 
             ticker = yf.Ticker(ticker_symbol)
             # 取得即時報價資訊
             info = ticker.fast_info
-            if hasattr(info, 'last_price') and info.last_price:
+            if hasattr(info, 'last_price') and info.last_price and not pd.isna(info.last_price):
                 return float(info.last_price)
             
             # 如果 fast_info 失敗，嘗試 history
@@ -202,13 +211,6 @@ class PriceFetcher:
             if not hist.empty:
                 return float(hist.iloc[-1]['Close'])
             
-            # 如果還是失敗，嘗試不帶後綴 (如果是加權指數等)
-            if symbol == 'TAIEX':
-                ticker = yf.Ticker("^TWII")
-                hist = ticker.history(period="1d", interval="1m")
-                if not hist.empty:
-                    return float(hist.iloc[-1]['Close'])
-                    
             return None
         except Exception as e:
             print(f"[{symbol}] yfinance 獲取失敗: {e}")
