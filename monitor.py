@@ -91,15 +91,18 @@ class MarketMonitor:
         
         for item in items:
             symbol = item['symbol']
-            # 辨識市場
-            is_us = symbol.isalpha() and "." not in symbol
+            # 辨識市場 (排除 TAIEX)
+            is_us = symbol.isalpha() and "." not in symbol and symbol.upper() != "TAIEX"
             
             # 如果不是交易時段且沒開啟強制檢查，跳過該市場標的
             if not self.allow_outside:
-                if is_us and not self.is_us_market_open():
-                    continue
-                if not is_us and not self.is_market_open():
-                    continue
+                if is_us:
+                    if not self.is_us_market_open():
+                        continue
+                else:
+                    # 台股標的 (含 TAIEX) 僅在台股開盤時檢查
+                    if not self.is_market_open():
+                        continue
 
             price_data = self.fetcher.get_last_price(symbol)
             
@@ -469,8 +472,54 @@ class MarketMonitor:
                 return True
         return False
 
+                    
+    async def send_noon_report(self):
+        """執行午間報告"""
+        price, ma20 = self.fetcher.get_ticker_ma("^TWII", window=20)
+        if price and ma20:
+            status = "📈 站上 MA20" if price >= ma20 else "📉 跌破 MA20"
+            message = (
+                f"🕛 **午間台股加權指數報告**\n\n"
+                f"• 目前指數: `{price:,.2f}`\n"
+                f"• 指數 MA20 : `{ma20:,.2f}`\n"
+                f"• 當前狀態: **{status}**\n\n"
+                f"系統持續監控中..."
+            )
+            await self.notifier.send_message(message)
+            return True
+        return False
+
+    async def send_daily_report(self):
+        """執行盤後綜合大報告"""
+        report_data = await self.get_report_data(offset=0)
+        now = self._get_now_taipei()
+        today_str = now.strftime("%Y-%m-%d")
+        
+        # 檢查數據日期是否為今日
+        if report_data['date'] != today_str:
+            print(f"[{now}] 數據日期 ({report_data['date']}) 與今日 ({today_str}) 不符，判定為休市，跳過盤後報告。")
+            return False
+
+        try:
+            # 嘗試生成圖片報告
+            img_path = self.generator.generate_closing_report(report_data['sentiment'], report_data['stock_list'])
+            caption = f"🏁 **台股每日盤後綜合報告 (15:00)**\n\n數據日期: `{report_data['date']}`"
+            await self.notifier.send_photo(img_path, caption=caption)
+        except Exception as e:
+            print(f"圖片報告生成失敗，改發送文字: {e}")
+            # 備援發送文字報告
+            sentiment_msg = ""
+            if report_data['sentiment']:
+                s = report_data['sentiment']
+                sentiment_msg = f"📊 **市場氣氛: {s['sentiment']}** | 量差: `{s['diff_vol']:+,}` | 過熱: `{s['overheat_index']:.2f}%` \n\n"
+            
+            summary = await self.get_detailed_summary(offset=0)
+            message = f"🏁 **台股每日盤後綜合報告 (15:00)**\n\n{sentiment_msg}📋 **監控標的摘要**\n{summary}"
+            await self.notifier.send_message(message)
+        return True
+
     async def run_monitor_loop(self):
-        """背景執行的監控迴圈"""
+        """背景執行的監控迴圈 (用於 Bot 模式)"""
         print(f"監控迴圈啟動 (主檢查間隔: {self.interval} 秒，時區: 台北 UTC+8)")
         while True:
             try:
@@ -479,7 +528,7 @@ class MarketMonitor:
                 curr_time = now.time()
                 is_weekday = now.weekday() <= 4
 
-                # 1. 檢查各項定時報告 (不論是否開盤，只要是工作日)
+                # 1. 檢查各項定時報告
                 if is_weekday:
                     # 09:00 開盤提醒
                     if dt_time(9, 0) <= curr_time < dt_time(9, 15):
@@ -492,50 +541,16 @@ class MarketMonitor:
                     # 12:00 中午報告
                     if dt_time(12, 0) <= curr_time < dt_time(12, 15):
                         if self.last_noon_date != today:
-                            price, ma20 = self.fetcher.get_ticker_ma("^TWII", window=20)
-                            if price and ma20:
-                                status = "📈 站上 MA20" if price >= ma20 else "📉 跌破 MA20"
-                                message = (
-                                    f"🕛 **午間台股加權指數報告**\n\n"
-                                    f"• 目前指數: `{price:,.2f}`\n"
-                                    f"• 指數 MA20 : `{ma20:,.2f}`\n"
-                                    f"• 當前狀態: **{status}**\n\n"
-                                    f"系統持續監控中..."
-                                )
-                                await self.notifier.send_message(message)
+                            if await self.send_noon_report():
                                 self.last_noon_date = today
 
-                    # 15:00 盤後綜合大報告 (包含收盤總結、買賣力道、詳細標的數據)
+                    # 15:00 盤後綜合大報告
                     if dt_time(15, 0) <= curr_time < dt_time(15, 20):
                         if self.last_daily_report_date != today:
-                            report_data = await self.get_report_data(offset=0)
-                            
-                            # 檢查數據日期是否為今日
-                            if report_data['date'] != today.strftime("%Y-%m-%d"):
-                                print(f"[{now}] 數據日期 ({report_data['date']}) 與今日 ({today}) 不符，判定為休市，跳過盤後報告。")
+                            if await self.send_daily_report():
                                 self.last_daily_report_date = today
-                                continue
-
-                            try:
-                                # 嘗試生成圖片報告
-                                img_path = self.generator.generate_closing_report(report_data['sentiment'], report_data['stock_list'])
-                                caption = f"🏁 **台股每日盤後綜合報告 (15:00)**\n\n數據日期: `{report_data['date']}`"
-                                await self.notifier.send_photo(img_path, caption=caption)
-                            except Exception as e:
-                                print(f"圖片報告生成失敗，改發送文字: {e}")
-                                # 備援發送文字報告
-                                sentiment_msg = ""
-                                if report_data['sentiment']:
-                                    s = report_data['sentiment']
-                                    sentiment_msg = f"📊 **市場氣氛: {s['sentiment']}** | 量差: `{s['diff_vol']:+,}` | 過熱: `{s['overheat_index']:.2f}%` \n\n"
-                                
-                                summary = await self.get_detailed_summary(offset=0)
-                                message = f"🏁 **台股每日盤後綜合報告 (15:00)**\n\n{sentiment_msg}📋 **監控標的摘要**\n{summary}"
-                                await self.notifier.send_message(message)
-                                
+                            # 無論是否發送成功，都視為已處理完畢今日任務
                             self.last_daily_report_date = today
-                            self.last_close_date = today
-                            self.last_order_stats_date = today
 
                 # 2. 處理常規價格檢查
                 import time as py_time
@@ -554,7 +569,6 @@ class MarketMonitor:
                         if success > 0 or fail > 0:
                             await self.notifier.send_message(f"✅ 定期價格檢查完成。成功: {success}, 失敗: {fail}")
                 else:
-                    # 如果都不是交易時段，且有記錄過上次檢查時間，則靜默跳過
                     if current_unix - self.last_check_time >= self.interval:
                         print(f"[{now}] 非交易時段 (台/美均收) 且未開啟全天候監控，跳過自動檢查。")
                         self.last_check_time = current_unix
@@ -565,11 +579,41 @@ class MarketMonitor:
             # 迴圈固定每分鐘運行一次，以確保不漏掉定時報告
             await asyncio.sleep(60)
 
-    def run(self):
-        """啟動程式 (整合 Telegram run_polling)"""
-        print("監控系統與 Telegram 機器人啟動中...")
+    async def run_once(self, mode):
+        """執行單次任務 (模式: check, noon, daily)"""
+        print(f"執行單次任務: {mode}")
+        if mode == "check":
+            # 在 One-shot 模式下，如果檢查到沒開盤則直接退出
+            if not self.is_market_open() and not self.is_us_market_open() and not self.allow_outside:
+                print("非交易時段且未開啟強制檢查，取消本次任務。")
+                return
+            await self.check_once()
+        elif mode == "noon":
+            await self.send_noon_report()
+        elif mode == "daily":
+            await self.send_daily_report()
+        else:
+            print(f"不支援的模式: {mode}")
+
+    def run_bot(self):
+        """啟動 Telegram 機器人常駐模式 (整合背景監控迴圈)"""
+        print("Telegram 機器人常駐模式啟動中...")
+        self._setup_callbacks()
         
-        # 串接指令回呼
+        app = self.notifier.app
+        if not app:
+            print("無法獲取 Telegram Application，請檢查 Token。")
+            return
+
+        async def post_init(application):
+            asyncio.create_task(self.run_monitor_loop())
+            print("背景監控任務已啟動。")
+
+        app.post_init = post_init
+        app.run_polling()
+
+    def _setup_callbacks(self):
+        """集中設定 Telegram 指令回呼"""
         self.notifier.set_data_callback(self.get_summary_callback)
         self.notifier.set_alert_callback(self.change_alert_callback)
         self.notifier.set_config_callback(self.change_config_callback)
@@ -584,22 +628,18 @@ class MarketMonitor:
         self.notifier.set_inventory_callback(self.inventory_callback)
         self.notifier.set_ocr_usage_callback(self.get_ocr_usage_report)
         self.notifier.set_fubon_sync_callback(self.sync_fubon_inventory_callback)
-        
-        # 獲取 Telegram Application
-        app = self.notifier.app
-        if not app:
-            print("無法獲取 Telegram Application，請檢查 Token。")
-            return
-
-        # 使用 post_init 來啟動背景監控任務
-        async def post_init(application):
-            asyncio.create_task(self.run_monitor_loop())
-            print("背景監控任務已啟動。")
-
-        # 啟動 Telegram 機器人 (這會阻塞並處理所有事件)
-        app.post_init = post_init
-        app.run_polling()
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="台美股監控系統")
+    parser.add_argument("--mode", choices=["bot", "check", "noon", "daily"], default="bot",
+                        help="執行模式: bot (常駐機器人), check (單次檢查), noon (午間報告), daily (盤後報告)")
+    args = parser.parse_args()
+
     monitor = MarketMonitor()
-    monitor.run()
+    
+    if args.mode == "bot":
+        monitor.run_bot()
+    else:
+        # 單次執行模式
+        asyncio.run(monitor.run_once(args.mode))
